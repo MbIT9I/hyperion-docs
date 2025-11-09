@@ -8,10 +8,13 @@ export const useSvgDiagramMarkup = ({ lang, path, chart }: DiagramParamsBase) =>
   const [isLoading, setIsLoading] = useState(true);
 
   const krokiApiUrl = useMemo(() => {
+    // Mermaid завжди рендериться локально (і inline chart, і з файлу)
     if (lang === 'mermaid') return '';
-    const url = new URL('/api/diagram', CLIENT_ENV().NEXT_PUBLIC_APP_URL);
 
-    if (path === '') {
+    const baseUrl = CLIENT_ENV().NEXT_PUBLIC_APP_URL || (typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000');
+    const url = new URL('/api/diagram', baseUrl);
+
+    if (!path || path === '') {
       throw new Error('path is required');
     }
 
@@ -19,38 +22,58 @@ export const useSvgDiagramMarkup = ({ lang, path, chart }: DiagramParamsBase) =>
     url.searchParams.set('path', path);
 
     return url.toString();
-  }, [lang, path]);
+  }, [lang, path, chart]);
 
   useEffect(() => {
     if (krokiApiUrl === '') return;
-
+    
     const fetchSvg = async () => {
       setIsLoading(true);
-      const response = await fetch(krokiApiUrl).then(async (res) => {
-        if (!res.ok) throw new Error(`Diagram fetch failed: ${res.status}`);
+      try {
+        const res = await fetch(krokiApiUrl);
+        
+        if (!res.ok) {
+          const errorText = await res.text();
+          console.error('Diagram fetch failed:', res.status, errorText);
+          setSvg(`<div style="color: red; padding: 20px;">Error loading diagram: ${res.status}</div>`);
+          setIsLoading(false);
+          return;
+        }
 
-        return res.text();
-      });
-
-      setSvg(response);
-      setIsLoading(false);
+        const response = await res.text();
+        setSvg(response);
+        setIsLoading(false);
+      } catch (error) {
+        console.error('Error while fetching diagram:', error);
+        setSvg(`<div style="color: red; padding: 20px;">Error: ${error instanceof Error ? error.message : 'Unknown error'}</div>`);
+        setIsLoading(false);
+      }
     };
 
-    fetchSvg().catch(() => {
-      console.error('Error while fetching diagram');
-      setIsLoading(false);
-    });
+    fetchSvg();
   }, [krokiApiUrl]);
 
   useEffect(() => {
     if (lang !== 'mermaid') return;
-    if (!chart) return;
+    if (!chart && !path) return;
 
     const renderChart = async () => {
       const { default: mermaid } = await import('mermaid');
 
       try {
         setIsLoading(true);
+        
+        // Якщо є path, завантажуємо файл
+        let mermaidCode = chart || '';
+        if (path && !chart) {
+          const baseUrl = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000';
+          const response = await fetch(`${baseUrl}/api/diagram?lang=text&path=${encodeURIComponent(path)}`);
+          if (!response.ok) {
+            throw new Error(`Failed to load mermaid file: ${response.status}`);
+          }
+          mermaidCode = await response.text();
+        }
+        
         mermaid.initialize({
           startOnLoad: false,
           securityLevel: 'loose',
@@ -59,12 +82,13 @@ export const useSvgDiagramMarkup = ({ lang, path, chart }: DiagramParamsBase) =>
           theme: 'default',
         });
 
-        const { svg: mermaidSvg } = await mermaid.render(id, chart.replaceAll('\\n', '\n'));
+        const { svg: mermaidSvg } = await mermaid.render(id, mermaidCode.replaceAll('\\n', '\n'));
 
         setSvg(mermaidSvg);
         setIsLoading(false);
       } catch (error) {
         console.error('Error while rendering mermaid', error);
+        setSvg(`<div style="color: red; padding: 20px;">Error rendering mermaid: ${error instanceof Error ? error.message : 'Unknown error'}</div>`);
         setIsLoading(false);
       }
     };
@@ -72,7 +96,7 @@ export const useSvgDiagramMarkup = ({ lang, path, chart }: DiagramParamsBase) =>
     renderChart().catch(() => {
       console.error('Error while rendering mermaid');
     });
-  }, [chart, id]);
+  }, [chart, id, lang, path]);
 
   return { svg, isLoading };
 };

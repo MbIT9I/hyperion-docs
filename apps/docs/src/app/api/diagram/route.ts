@@ -12,6 +12,7 @@ const LANG_MAP: Record<string, string> = {
   graphviz: 'graphviz',
   mermaid: 'mermaid',
   c4plantuml: 'c4plantuml',
+  text: 'text', // Для завантаження файлів без обробки
 };
 const MAX_BYTES = 256 * 1024;
 
@@ -96,6 +97,14 @@ export const GET = async (req: NextRequest) => {
     if (!abs.startsWith(BASE_DIR)) return NextResponse.json({ error: 'Path outside allowlist' }, { status: 400 });
 
     const data = await fs.readFile(abs, 'utf8');
+
+    // Якщо запитано просто текст (для mermaid client-side rendering)
+    if (kind === 'text') {
+      return new NextResponse(data, {
+        status: 200,
+        headers: { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' },
+      });
+    }
 
     // Resolve !include directives
     const resolvedContent = await resolveIncludes(data, path.dirname(abs));
