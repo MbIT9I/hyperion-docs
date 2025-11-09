@@ -1,0 +1,34 @@
+flowchart TD
+    Start([Початок: Пошук подій]) --> Input[Отримання NotificationSearchDto]
+    Input --> CheckFeature{UseNewInnerChat feature?}
+    
+    CheckFeature -->|Так| PrepareHTTP[Серіалізувати model до JSON]
+    CheckFeature -->|Ні| CallOldService
+    
+    PrepareHTTP --> CallNewAPI[HTTP POST до CommercialApi/GetMessagesForEvent]
+    CallOldService[Викликати InnerChatService.GetMessagesForEvent] --> ParallelStart
+    CallNewAPI --> ParallelStart[Паралельне виконання]
+    
+    ParallelStart --> Task1[GetNotifications з фільтрами]
+    ParallelStart --> Task2[GetMessagesForEvent from InnerChat]
+    
+    Task1 --> WaitBoth{Обидва Task завершені?}
+    Task2 --> WaitBoth
+    
+    WaitBoth --> MergeResults[Створити список notifications]
+    MergeResults --> CheckNotifSuccess{Notifications успішні?}
+    
+    CheckNotifSuccess -->|Так| AddNotifications[Додати до списку]
+    CheckNotifSuccess -->|Ні| CheckChatSuccess
+    AddNotifications --> CheckChatSuccess{InnerChat успішні?}
+    
+    CheckChatSuccess -->|Так| AddMessages[Додати до списку]
+    CheckChatSuccess -->|Ні| GroupByEntity
+    AddMessages --> GroupByEntity[Групувати по SubscriptionEntityId]
+    
+    GroupByEntity --> FlattenMessages[Об'єднати Messages з кожної групи]
+    FlattenMessages --> SortMessages[Сортувати по Timestamp DESC]
+    SortMessages --> BuildResult[Побудувати NotificationsDto для кожної групи]
+    
+    BuildResult --> Success([Успіх: Повернути List NotificationsDto])
+    Success --> End([Кінець])

@@ -1,0 +1,22 @@
+flowchart TD
+    Start([Початок: Користувач переглядає]) --> Input[Отримання UpdateMessageViewDto]
+    Input --> GetLogin[Отримати login користувача]
+    GetLogin --> QueryNotifications[Запит непереглянутих notifications]
+    
+    QueryNotifications --> FilterByUser[Фільтр по UserLogin]
+    FilterByUser --> FilterByIds[Фільтр по MessageIds]
+    FilterByIds --> FilterViewed[Фільтр Viewed = false]
+    
+    FilterViewed --> CheckExists{Знайдено notifications?}
+    CheckExists -->|Ні| ReturnEmpty[Повернути порожній список]
+    CheckExists -->|Так| UpdateLoop[Для кожного notification]
+    
+    UpdateLoop --> SetViewed[Встановити Viewed = true]
+    SetViewed --> SaveChanges[(Зберегти зміни в БД)]
+    
+    SaveChanges --> GroupResults[Групувати по SubscriptionEntityId]
+    GroupResults --> MapToDto[Map to NotificationsViewedDto]
+    MapToDto --> Success([Успіх: Повернути список оновлених])
+    
+    ReturnEmpty --> End([Кінець])
+    Success --> End

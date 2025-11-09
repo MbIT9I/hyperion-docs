@@ -1,0 +1,18 @@
+flowchart TD
+Start([POST /UpdateMessageStatus]) --> ReceiveIds[Отримати List MessageIds]
+
+ReceiveIds --> GetUserLogin[Отримати поточний UserLogin]
+GetUserLogin --> FindViews[(Знайти MessageViewDb записи)]
+
+FindViews --> FilterByUser[Фільтрація по MessageId та UserLogin]
+FilterByUser --> UpdateViewed[Встановити Viewed = true]
+
+UpdateViewed --> SaveChanges[(Зберегти в БД)]
+SaveChanges --> MapToDto[Конвертувати в MessagesViewedDto]
+
+MapToDto --> ReturnResult[Повернути список оновлених views]
+ReturnResult --> End([200 OK])
+
+style FindViews fill:#e1f5ff
+style SaveChanges fill:#e1f5ff
+style ReturnResult fill:#e8f5e9

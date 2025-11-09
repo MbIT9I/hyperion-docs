@@ -1,0 +1,17 @@
+flowchart TD
+Start([SendInnerChatMessageConsumer]) --> ReceiveMessageId[Отримати MessageId з черги]
+ReceiveMessageId --> QueryDB[(Запит GetInnerChatMessage)]
+QueryDB --> LoadMessage[Завантажити ChatMessageDb]
+
+LoadMessage --> IncludeTags[INCLUDE Tags]
+IncludeTags --> IncludeAttachments[INCLUDE Attachments]
+IncludeAttachments --> IncludeEntity[INCLUDE Entity]
+
+IncludeEntity --> ReturnDb[Повернути ChatMessageDb]
+ReturnDb --> ProcessConsumer[Consumer обробляє дані]
+
+ProcessConsumer --> SendNotifications[Відправка нотифікацій]
+SendNotifications --> End([ACK message])
+
+style QueryDB fill:#e1f5ff
+style SendNotifications fill:#fff4e1

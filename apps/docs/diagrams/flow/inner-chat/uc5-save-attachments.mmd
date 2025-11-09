@@ -1,0 +1,24 @@
+flowchart TD
+Start([POST /UploadAttachments]) --> ReceiveFiles[Отримати List IFormFile]
+ReceiveFiles --> ValidateFiles{Валідація файлів}
+ValidateFiles -->|Помилка| ErrorResponse[400 Bad Request]
+
+ValidateFiles -->|Успіх| ProcessFiles[Обробка кожного файлу]
+ProcessFiles --> ReadStream[Читання Stream в byte array]
+ReadStream --> ExtractMetadata[Витягти FileName, FileSize, Type]
+
+ExtractMetadata --> GenerateGuid[Генерація Guid для attachment]
+GenerateGuid --> CreateAttachment[Створити MessageAttachmentDb]
+CreateAttachment --> NullMessageId[MessageId = null на цьому етапі]
+
+NullMessageId --> SaveToDB[(Зберегти attachments в БД)]
+SaveToDB --> MapToDto[Конвертувати в MessageAttachmentDto]
+
+MapToDto --> ReturnIds[Повернути List з Id, FileName, Type]
+ReturnIds --> Success[200 OK]
+
+ErrorResponse --> End([End])
+Success --> End
+
+style SaveToDB fill:#e1f5ff
+style ReturnIds fill:#e8f5e9

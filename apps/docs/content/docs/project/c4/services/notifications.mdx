@@ -55,36 +55,7 @@ Actors: System, EventSubmitter, Subscribers
 
 Actors: User (authenticated)
 
-<Diagram
-  lang="mermaid"
-  chart="
-flowchart TD
-    Start([Початок: Запит користувача]) --> Input[Отримання NotificationSearchDto]
-    Input --> CheckTagMe{Filter.TagMe == true?}
-    
-    CheckTagMe -->|Так| ReturnEmpty[Повернути порожній результат]
-    CheckTagMe -->|Ні| GetUserLogin[Отримати login поточного користувача]
-    
-    ReturnEmpty --> End([Кінець])
-    
-    GetUserLogin --> GetSubIds[Отримати SubscriptionEntityIds користувача]
-    GetSubIds --> BuildQuery[Побудувати запит notifications]
-    
-    BuildQuery --> FilterByEntities{SubscriptionEntityIds задано?}
-    FilterByEntities -->|Так| ApplyEntityFilter[Фільтрувати по entities]
-    FilterByEntities -->|Ні| CheckUnviewed
-    ApplyEntityFilter --> CheckUnviewed{Filter.Unviewed задано?}
-    
-    CheckUnviewed -->|Так| ApplyViewedFilter[Фільтрувати по Viewed статусу]
-    CheckUnviewed -->|Ні| ExecuteQuery
-    ApplyViewedFilter --> ExecuteQuery[(Виконати запит до БД)]
-    
-    ExecuteQuery --> GroupBySubscription[Групувати по SubscriptionId]
-    GroupBySubscription --> OrderByTimestamp[Сортувати по Timestamp DESC]
-    OrderByTimestamp --> MapToDto[Map to List NotificationsDto]
-    MapToDto --> Success([Успіх: Повернути NotificationsDto])
-    Success --> End
-"/>
+<Diagram lang="mermaid" path="flow/notifications/uc2.mmd" alt="Use Case 2: GetNotifications Flow" />
 
 ---
 
@@ -95,32 +66,7 @@ flowchart TD
 
 Actors: User (authenticated)
 
-<Diagram
-  lang="mermaid"
-  chart="
-flowchart TD
-    Start([Початок: Користувач переглядає]) --> Input[Отримання UpdateMessageViewDto]
-    Input --> GetLogin[Отримати login користувача]
-    GetLogin --> QueryNotifications[Запит непереглянутих notifications]
-    
-    QueryNotifications --> FilterByUser[Фільтр по UserLogin]
-    FilterByUser --> FilterByIds[Фільтр по MessageIds]
-    FilterByIds --> FilterViewed[Фільтр Viewed = false]
-    
-    FilterViewed --> CheckExists{Знайдено notifications?}
-    CheckExists -->|Ні| ReturnEmpty[Повернути порожній список]
-    CheckExists -->|Так| UpdateLoop[Для кожного notification]
-    
-    UpdateLoop --> SetViewed[Встановити Viewed = true]
-    SetViewed --> SaveChanges[(Зберегти зміни в БД)]
-    
-    SaveChanges --> GroupResults[Групувати по SubscriptionEntityId]
-    GroupResults --> MapToDto[Map to NotificationsViewedDto]
-    MapToDto --> Success([Успіх: Повернути список оновлених])
-    
-    ReturnEmpty --> End([Кінець])
-    Success --> End
-"/>
+<Diagram lang="mermaid" path="flow/notifications/uc3.mmd" alt="Use Case 3: UpdateNotificationStatus Flow" />
 
 ---
 
@@ -131,43 +77,7 @@ flowchart TD
 
 Actors: User (authenticated), NotificationService, InnerChatService
 
-<Diagram
-  lang="mermaid"
-  chart="
-flowchart TD
-    Start([Початок: Запит останніх подій]) --> Input[Отримання size параметру]
-    Input --> ValidateSize{size <= 0?}
-    ValidateSize -->|Так| SetDefault[size = 10]
-    ValidateSize -->|Ні| CheckFeature
-    SetDefault --> CheckFeature{UseNewInnerChat feature?}
-    
-    CheckFeature -->|Так| CallNewAPI[HTTP запит до CommercialApi]
-    CheckFeature -->|Ні| CallOldService[Викликати старий InnerChatService]
-    
-    CallNewAPI --> ParallelStart[Паралельне виконання]
-    CallOldService --> ParallelStart
-    
-    ParallelStart --> Task1[GetLastNotifications]
-    ParallelStart --> Task2[GetLastMessages from InnerChat]
-    
-    Task1 --> WaitBoth{Обидва Task завершені?}
-    Task2 --> WaitBoth
-    
-    WaitBoth --> MergeResults[Об'єднати результати в один список]
-    MergeResults --> CheckNotifSuccess{Notifications успішні?}
-    
-    CheckNotifSuccess -->|Так| AddNotifications[Додати notifications до результату]
-    CheckNotifSuccess -->|Ні| CheckChatSuccess
-    AddNotifications --> CheckChatSuccess{InnerChat успішні?}
-    
-    CheckChatSuccess -->|Так| AddMessages[Додати messages до результату]
-    CheckChatSuccess -->|Ні| SortResults
-    AddMessages --> SortResults[Сортувати по Timestamp DESC]
-    
-    SortResults --> TakeSize[Take size елементів]
-    TakeSize --> Success([Успіх: Повернути List NotificationDto])
-    Success --> End([Кінець])
-"/>
+<Diagram lang="mermaid" path="flow/notifications/uc4.mmd" alt="Use Case 4: GetLastEvents Flow" />
 
 ---
 ### 5. UpdateEventStatus - Оновлення статусів подій (Notifications + InnerChat)
@@ -176,54 +86,8 @@ flowchart TD
 Тригер: Користувач відкриває події або позначає їх як прочитані
 
 Actors: User (authenticated), NotificationService, InnerChatService, SubscriptionService
-<Diagram
-  lang="mermaid"
-  chart="
-flowchart TD
-    Start([Початок: Оновлення статусів]) --> Input[Отримання UpdateEventViewDto]
-    Input --> PrepareCollections[Створити 2 колекції: innerChat та notifications]
-    PrepareCollections --> LoopMessages[Для кожного message в Messages]
-    
-    LoopMessages --> CheckType{EventType == InnerChat?}
-    CheckType -->|Так| AddToInnerChat[Додати MessageId до innerChatMessages]
-    CheckType -->|Ні| AddToNotif[Додати MessageId до notificationMessages]
-    
-    AddToInnerChat --> NextMessage{Ще є messages?}
-    AddToNotif --> NextMessage
-    NextMessage -->|Так| LoopMessages
-    NextMessage -->|Ні| CheckFeature{UseNewInnerChat feature?}
-    
-    CheckFeature -->|Так| CallNewChatAPI[HTTP POST до CommercialApi]
-    CheckFeature -->|Ні| CallOldChat[Викликати InnerChatService]
-    
-    CallNewChatAPI --> ParallelTasks[Паралельне виконання]
-    CallOldChat --> ParallelTasks
-    
-    ParallelTasks --> Task1[UpdateMessageStatusForEvent InnerChat]
-    ParallelTasks --> Task2[UpdateNotificationStatus Notifications]
-    
-    Task1 --> WaitBoth{Обидва Task завершені?}
-    Task2 --> WaitBoth
-    
-    WaitBoth --> UpdateUserStats[UpdateUserStatisticByEntities]
-    UpdateUserStats --> PrepareResults[Створити результуючий словник]
-    
-    PrepareResults --> CheckNotifResult{Notifications успішні?}
-    CheckNotifResult -->|Так| ProcessNotif[Групувати по SubscriptionEntityId]
-    CheckNotifResult -->|Ні| CheckChatResult
-    
-    ProcessNotif --> AddNotifToDict[Додати до словника з EventType=Notification]
-    AddNotifToDict --> CheckChatResult{InnerChat успішні?}
-    
-    CheckChatResult -->|Так| ProcessChat[Групувати по SubscriptionEntityId]
-    CheckChatResult -->|Ні| BuildFinalResult
-    
-    ProcessChat --> AddChatToDict[Додати до словника з EventType=InnerChat]
-    AddChatToDict --> BuildFinalResult[Побудувати List EventsViewedDto]
-    
-    BuildFinalResult --> Success([Успіх: Повернути EventsViewedDto])
-    Success --> End([Кінець])
-"/>
+
+<Diagram lang="mermaid" path="flow/notifications/uc5.mmd" alt="Use Case 5: UpdateEventStatus Flow" />
 
 ---
 ### 6. GetEvents - Отримання подій з фільтрацією (Notifications + InnerChat)
@@ -233,44 +97,7 @@ flowchart TD
 
 Actors: User (authenticated), NotificationService, InnerChatService
 
-<Diagram
-  lang="mermaid"
-  chart="
-flowchart TD
-    Start([Початок: Пошук подій]) --> Input[Отримання NotificationSearchDto]
-    Input --> CheckFeature{UseNewInnerChat feature?}
-    
-    CheckFeature -->|Так| PrepareHTTP[Серіалізувати model до JSON]
-    CheckFeature -->|Ні| CallOldService
-    
-    PrepareHTTP --> CallNewAPI[HTTP POST до CommercialApi/GetMessagesForEvent]
-    CallOldService[Викликати InnerChatService.GetMessagesForEvent] --> ParallelStart
-    CallNewAPI --> ParallelStart[Паралельне виконання]
-    
-    ParallelStart --> Task1[GetNotifications з фільтрами]
-    ParallelStart --> Task2[GetMessagesForEvent from InnerChat]
-    
-    Task1 --> WaitBoth{Обидва Task завершені?}
-    Task2 --> WaitBoth
-    
-    WaitBoth --> MergeResults[Створити список notifications]
-    MergeResults --> CheckNotifSuccess{Notifications успішні?}
-    
-    CheckNotifSuccess -->|Так| AddNotifications[Додати до списку]
-    CheckNotifSuccess -->|Ні| CheckChatSuccess
-    AddNotifications --> CheckChatSuccess{InnerChat успішні?}
-    
-    CheckChatSuccess -->|Так| AddMessages[Додати до списку]
-    CheckChatSuccess -->|Ні| GroupByEntity
-    AddMessages --> GroupByEntity[Групувати по SubscriptionEntityId]
-    
-    GroupByEntity --> FlattenMessages[Об'єднати Messages з кожної групи]
-    FlattenMessages --> SortMessages[Сортувати по Timestamp DESC]
-    SortMessages --> BuildResult[Побудувати NotificationsDto для кожної групи]
-    
-    BuildResult --> Success([Успіх: Повернути List NotificationsDto])
-    Success --> End([Кінець])
-"/>
+<Diagram lang="mermaid" path="flow/notifications/uc6.mmd" alt="Use Case 6: GetEvents Flow" />
 
 ---
 ### 7. SaveMessageForUsersAsync - Збереження оповіщення для конкретних користувачів
@@ -280,36 +107,7 @@ flowchart TD
 
 Actors: System, Specific Users List
 
-<Diagram
-  lang="mermaid"
-  chart="
-flowchart TD
-    Start([Початок: Targeted notification]) --> Input[Отримання EventDto + userLogins]
-    Input --> ValidateUsers{userLogins не порожній?}
-    
-    ValidateUsers -->|Ні| CallStandard[Викликати SaveMessageAsync без фільтрації]
-    ValidateUsers -->|Так| CreateMessage[Створити NotificationMessageDb]
-    
-    CreateMessage --> ExtractProps[Витягнути Properties]
-    ExtractProps --> QuerySubs[Запит підписок по EventEntity]
-    
-    QuerySubs --> FilterSubmitter[Виключити submitter]
-    FilterSubmitter --> FilterUnsubscribed[Виключити відписаних]
-    FilterUnsubscribed --> FilterByUserLogins[Залишити ТІЛЬКИ з userLogins списку]
-    
-    FilterByUserLogins --> CheckEmpty{Є підписники?}
-    CheckEmpty -->|Ні| ErrorNoSubs[Повернути помилку]
-    CheckEmpty -->|Так| UpdateEntity[Оновити Entity]
-    
-    UpdateEntity --> CreateNotifications[Створити Notification записи]
-    CreateNotifications --> SaveToDB[(Зберегти в БД)]
-    SaveToDB --> UpdateStats[Оновити статистику користувачів]
-    UpdateStats --> Success([Успіх: Повернути NotificationDto])
-    
-    CallStandard --> End([Кінець])
-    ErrorNoSubs --> End
-    Success --> End
-"/>
+<Diagram lang="mermaid" path="flow/notifications/uc7.mmd" alt="Use Case 7: SaveMessageForUsersAsync Flow" />
 
 ---
 ## Рекомендації

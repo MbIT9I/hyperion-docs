@@ -1,0 +1,26 @@
+flowchart TD
+    Start([Початок: Запит користувача]) --> Input[Отримання NotificationSearchDto]
+    Input --> CheckTagMe{Filter.TagMe == true?}
+    
+    CheckTagMe -->|Так| ReturnEmpty[Повернути порожній результат]
+    CheckTagMe -->|Ні| GetUserLogin[Отримати login поточного користувача]
+    
+    ReturnEmpty --> End([Кінець])
+    
+    GetUserLogin --> GetSubIds[Отримати SubscriptionEntityIds користувача]
+    GetSubIds --> BuildQuery[Побудувати запит notifications]
+    
+    BuildQuery --> FilterByEntities{SubscriptionEntityIds задано?}
+    FilterByEntities -->|Так| ApplyEntityFilter[Фільтрувати по entities]
+    FilterByEntities -->|Ні| CheckUnviewed
+    ApplyEntityFilter --> CheckUnviewed{Filter.Unviewed задано?}
+    
+    CheckUnviewed -->|Так| ApplyViewedFilter[Фільтрувати по Viewed статусу]
+    CheckUnviewed -->|Ні| ExecuteQuery
+    ApplyViewedFilter --> ExecuteQuery[(Виконати запит до БД)]
+    
+    ExecuteQuery --> GroupBySubscription[Групувати по SubscriptionId]
+    GroupBySubscription --> OrderByTimestamp[Сортувати по Timestamp DESC]
+    OrderByTimestamp --> MapToDto[Map to List NotificationsDto]
+    MapToDto --> Success([Успіх: Повернути NotificationsDto])
+    Success --> End

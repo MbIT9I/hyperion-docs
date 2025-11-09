@@ -1,0 +1,44 @@
+flowchart TD
+    Start([Початок: Оновлення статусів]) --> Input[Отримання UpdateEventViewDto]
+    Input --> PrepareCollections[Створити 2 колекції: innerChat та notifications]
+    PrepareCollections --> LoopMessages[Для кожного message в Messages]
+    
+    LoopMessages --> CheckType{EventType == InnerChat?}
+    CheckType -->|Так| AddToInnerChat[Додати MessageId до innerChatMessages]
+    CheckType -->|Ні| AddToNotif[Додати MessageId до notificationMessages]
+    
+    AddToInnerChat --> NextMessage{Ще є messages?}
+    AddToNotif --> NextMessage
+    NextMessage -->|Так| LoopMessages
+    NextMessage -->|Ні| CheckFeature{UseNewInnerChat feature?}
+    
+    CheckFeature -->|Так| CallNewChatAPI[HTTP POST до CommercialApi]
+    CheckFeature -->|Ні| CallOldChat[Викликати InnerChatService]
+    
+    CallNewChatAPI --> ParallelTasks[Паралельне виконання]
+    CallOldChat --> ParallelTasks
+    
+    ParallelTasks --> Task1[UpdateMessageStatusForEvent InnerChat]
+    ParallelTasks --> Task2[UpdateNotificationStatus Notifications]
+    
+    Task1 --> WaitBoth{Обидва Task завершені?}
+    Task2 --> WaitBoth
+    
+    WaitBoth --> UpdateUserStats[UpdateUserStatisticByEntities]
+    UpdateUserStats --> PrepareResults[Створити результуючий словник]
+    
+    PrepareResults --> CheckNotifResult{Notifications успішні?}
+    CheckNotifResult -->|Так| ProcessNotif[Групувати по SubscriptionEntityId]
+    CheckNotifResult -->|Ні| CheckChatResult
+    
+    ProcessNotif --> AddNotifToDict[Додати до словника з EventType=Notification]
+    AddNotifToDict --> CheckChatResult{InnerChat успішні?}
+    
+    CheckChatResult -->|Так| ProcessChat[Групувати по SubscriptionEntityId]
+    CheckChatResult -->|Ні| BuildFinalResult
+    
+    ProcessChat --> AddChatToDict[Додати до словника з EventType=InnerChat]
+    AddChatToDict --> BuildFinalResult[Побудувати List EventsViewedDto]
+    
+    BuildFinalResult --> Success([Успіх: Повернути EventsViewedDto])
+    Success --> End([Кінець])

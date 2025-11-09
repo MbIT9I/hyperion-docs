@@ -1,0 +1,33 @@
+flowchart TD
+Start([POST /GetChatMessages]) --> ParseRequest[Отримати entityId, entityType, page, size]
+ParseRequest --> GetEntity[(Пошук EventSubscriptionEntity)]
+GetEntity --> EntityExists{Entity існує?}
+
+EntityExists -->|Ні| ReturnEmpty[Повернути порожній результат]
+ReturnEmpty --> EmptyResult[SubscriptionEntityId=Empty, Count=0]
+
+EntityExists -->|Так| CalculatePagination[Розрахунок skip = page-1 * size]
+CalculatePagination --> LoadMessages[(Завантажити повідомлення з БД)]
+
+LoadMessages --> CheckMessages{Повідомлення є?}
+CheckMessages -->|Ні| ReturnEmptyWithId[SubscriptionEntityId заповнено, Messages=empty]
+
+CheckMessages -->|Так| ConvertToDto[Конвертація ChatMessageDb → InnerChatMessageDto]
+ConvertToDto --> LoadTags[Завантажити Tags]
+LoadTags --> LoadAttachments[Завантажити Attachments без Content]
+LoadAttachments --> LoadViews[(Завантажити MessageViews для користувача)]
+
+LoadViews --> SetViewedFlags[Встановити IsViewed flags]
+SetViewedFlags --> LoadParents[(Завантажити ParentMessages)]
+
+LoadParents --> GetCounts[Отримати MessagesCount та UnreadCount]
+GetCounts --> BuildResult[Створити InnerChatMessagesDto]
+
+BuildResult --> Success[200 OK з Messages]
+EmptyResult --> Success
+ReturnEmptyWithId --> Success
+Success --> End([End])
+
+style LoadMessages fill:#e1f5ff
+style LoadViews fill:#e1f5ff
+style BuildResult fill:#e8f5e9

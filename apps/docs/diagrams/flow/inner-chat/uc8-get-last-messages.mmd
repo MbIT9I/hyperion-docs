@@ -1,0 +1,24 @@
+flowchart TD
+Start([GET /GetLastMessages]) --> ReceiveCount[Отримати count параметр]
+ReceiveCount --> ValidateCount{count > 0?}
+ValidateCount -->|Ні| SetDefault[count = PAGE_SIZE default]
+ValidateCount -->|Так| UseCount[Використати count]
+
+SetDefault --> QueryDB
+UseCount --> QueryDB[(Запит до БД)]
+
+QueryDB --> GetUserLogin[Фільтр по UserLogin]
+GetUserLogin --> FilterUnread[EventViewed = false]
+FilterUnread --> OrderByTimestamp[ORDER BY Timestamp DESC]
+
+OrderByTimestamp --> TakeCount[TAKE count]
+TakeCount --> LoadData[Завантажити дані]
+
+LoadData --> MapToNotificationDto[AutoMapper → NotificationDto]
+MapToNotificationDto --> ReturnList[Повернути List NotificationDto]
+
+ReturnList --> End([200 OK])
+
+style QueryDB fill:#e1f5ff
+style MapToNotificationDto fill:#fff4e1
+style ReturnList fill:#e8f5e9

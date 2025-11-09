@@ -1,0 +1,26 @@
+flowchart TD
+Start([GET /DownloadAttachment]) --> ReceiveFileId[Отримати Guid fileId]
+ReceiveFileId --> FindAttachment[(Знайти MessageAttachmentDb)]
+FindAttachment --> AttachmentExists{Attachment існує?}
+
+AttachmentExists -->|Ні| Return404[404 Not Found]
+AttachmentExists -->|Так| LoadContent[Завантажити Content byte array]
+
+LoadContent --> GetMetadata[Отримати FileName, Type]
+GetMetadata --> DetermineMimeType[Визначити MIME type]
+
+DetermineMimeType --> SpecialCase{Спеціальний тип?}
+SpecialCase -->|.7z| SetCustomMime[application/x-7z-compressed]
+SpecialCase -->|Інший| UseMimeProvider[FileExtensionContentTypeProvider]
+
+SetCustomMime --> CreateModel[Створити AttachmentContentBllModel]
+UseMimeProvider --> CreateModel
+
+CreateModel --> ReturnFile[Повернути File з Content]
+ReturnFile --> Success[200 OK + file stream]
+
+Return404 --> End([End])
+Success --> End
+
+style FindAttachment fill:#e1f5ff
+style ReturnFile fill:#e8f5e9

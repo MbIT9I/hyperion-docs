@@ -1,0 +1,22 @@
+flowchart TD
+Start([POST /GetMessagesForEvent]) --> ReceiveSearch[Отримати NotificationSearchDto]
+
+ReceiveSearch --> GetUserLogin[Отримати поточний UserLogin]
+GetUserLogin --> QueryDB[(Складний запит до БД)]
+
+QueryDB --> FilterSubscriptions[Фільтр по підпискам користувача]
+FilterSubscriptions --> FilterUnread[Фільтр по непрочитаним]
+FilterUnread --> JoinEntities[JOIN з Entity для Properties]
+
+JoinEntities --> JoinMessages[JOIN з Messages]
+JoinMessages --> ApplySearch[Застосування NotificationSearchDto фільтрів]
+
+ApplySearch --> LoadData[Завантажити дані]
+LoadData --> MapToNotificationsDto[AutoMapper → NotificationsDto]
+
+MapToNotificationsDto --> ReturnList[Повернути List NotificationsDto]
+ReturnList --> End([200 OK])
+
+style QueryDB fill:#e1f5ff
+style MapToNotificationsDto fill:#fff4e1
+style ReturnList fill:#e8f5e9

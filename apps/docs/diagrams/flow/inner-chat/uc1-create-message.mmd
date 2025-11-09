@@ -1,0 +1,34 @@
+flowchart TD
+Start([POST /CreateMessages]) --> CheckAuth{Користувач авторизований?}
+CheckAuth -->|Ні| Unauthorized[401 Unauthorized]
+CheckAuth -->|Так| GetSubscription[Отримати підписку користувача]
+GetSubscription --> ValidateSubscription{Підписка існує?}
+ValidateSubscription -->|Ні| ReturnNull[Повернути null]
+ValidateSubscription -->|Так| PrepareMessages[Підготовка повідомлень]
+
+PrepareMessages --> GenerateIds[Генерація Guid для повідомлень]
+GenerateIds --> ProcessTags[Обробка тегів User/Lot/Bid/Tender]
+ProcessTags --> ProcessAttachments[Прив'язка вкладень]
+ProcessAttachments --> SetTimestamp[Встановлення timestamp]
+
+SetTimestamp --> SaveToDB[(Збереження в БД)]
+SaveToDB --> SaveMessages[Зберегти ChatMessageDb]
+SaveMessages --> SaveAttachmentLinks[Зберегти зв'язки attachments]
+
+SaveAttachmentLinks --> ExtractTagUsers[Витягнути теговані користувачів]
+ExtractTagUsers --> ExtractParentAuthors[Витягнути авторів батьківських повідомлень]
+
+ExtractParentAuthors --> PublishBroker[Публікація в Message Broker]
+PublishBroker --> PublishAfterCreate[AfterCreateInnerChatMessagesMessage]
+PublishAfterCreate --> PublishNotifications[SendInnerChatMessageMessage для кожного повідомлення]
+
+PublishNotifications --> LoadParents[Завантажити батьківські повідомлення]
+LoadParents --> ReturnResult[Повернути InnerChatMessageDto list]
+ReturnResult --> End([200 OK])
+
+Unauthorized --> EndError([End])
+ReturnNull --> EndError
+
+style SaveToDB fill:#e1f5ff
+style PublishBroker fill:#fff4e1
+style ReturnResult fill:#e8f5e9

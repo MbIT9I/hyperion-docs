@@ -35,44 +35,7 @@ icon: Book
 **Тригер**: POST /CreateMessages з CreateChatMessagesDto \
 **Actors**: Авторизований користувач, Message Broker, підписники події
 
-<Diagram
-lang="mermaid"
-chart="
-flowchart TD
-Start([POST /CreateMessages]) --> CheckAuth{Користувач авторизований?}
-CheckAuth -->|Ні| Unauthorized[401 Unauthorized]
-CheckAuth -->|Так| GetSubscription[Отримати підписку користувача]
-GetSubscription --> ValidateSubscription{Підписка існує?}
-ValidateSubscription -->|Ні| ReturnNull[Повернути null]
-ValidateSubscription -->|Так| PrepareMessages[Підготовка повідомлень]
-
-PrepareMessages --> GenerateIds[Генерація Guid для повідомлень]
-GenerateIds --> ProcessTags[Обробка тегів User/Lot/Bid/Tender]
-ProcessTags --> ProcessAttachments[Прив'язка вкладень]
-ProcessAttachments --> SetTimestamp[Встановлення timestamp]
-
-SetTimestamp --> SaveToDB[(Збереження в БД)]
-SaveToDB --> SaveMessages[Зберегти ChatMessageDb]
-SaveMessages --> SaveAttachmentLinks[Зберегти зв'язки attachments]
-
-SaveAttachmentLinks --> ExtractTagUsers[Витягнути теговані користувачів]
-ExtractTagUsers --> ExtractParentAuthors[Витягнути авторів батьківських повідомлень]
-
-ExtractParentAuthors --> PublishBroker[Публікація в Message Broker]
-PublishBroker --> PublishAfterCreate[AfterCreateInnerChatMessagesMessage]
-PublishAfterCreate --> PublishNotifications[SendInnerChatMessageMessage для кожного повідомлення]
-
-PublishNotifications --> LoadParents[Завантажити батьківські повідомлення]
-LoadParents --> ReturnResult[Повернути InnerChatMessageDto list]
-ReturnResult --> End([200 OK])
-
-Unauthorized --> EndError([End])
-ReturnNull --> EndError
-
-style SaveToDB fill:#e1f5ff
-style PublishBroker fill:#fff4e1
-style ReturnResult fill:#e8f5e9
-" />
+<Diagram lang="mermaid" path="flow/inner-chat/uc1-create-message.mmd" alt="Use Case 1: Create Message Flow" />
 
 ### 2. Отримання повідомлень чату (GetChatMessages)
 
@@ -80,43 +43,7 @@ style ReturnResult fill:#e8f5e9
 **Тригер**: POST /GetChatMessages з GetChatMessagesDto \
 **Actors**: Авторизований користувач 
 
-<Diagram
-lang="mermaid"
-chart="
-flowchart TD
-Start([POST /GetChatMessages]) --> ParseRequest[Отримати entityId, entityType, page, size]
-ParseRequest --> GetEntity[(Пошук EventSubscriptionEntity)]
-GetEntity --> EntityExists{Entity існує?}
-
-EntityExists -->|Ні| ReturnEmpty[Повернути порожній результат]
-ReturnEmpty --> EmptyResult[SubscriptionEntityId=Empty, Count=0]
-
-EntityExists -->|Так| CalculatePagination[Розрахунок skip = page-1 * size]
-CalculatePagination --> LoadMessages[(Завантажити повідомлення з БД)]
-
-LoadMessages --> CheckMessages{Повідомлення є?}
-CheckMessages -->|Ні| ReturnEmptyWithId[SubscriptionEntityId заповнено, Messages=empty]
-
-CheckMessages -->|Так| ConvertToDto[Конвертація ChatMessageDb → InnerChatMessageDto]
-ConvertToDto --> LoadTags[Завантажити Tags]
-LoadTags --> LoadAttachments[Завантажити Attachments без Content]
-LoadAttachments --> LoadViews[(Завантажити MessageViews для користувача)]
-
-LoadViews --> SetViewedFlags[Встановити IsViewed flags]
-SetViewedFlags --> LoadParents[(Завантажити ParentMessages)]
-
-LoadParents --> GetCounts[Отримати MessagesCount та UnreadCount]
-GetCounts --> BuildResult[Створити InnerChatMessagesDto]
-
-BuildResult --> Success[200 OK з Messages]
-EmptyResult --> Success
-ReturnEmptyWithId --> Success
-Success --> End([End])
-
-style LoadMessages fill:#e1f5ff
-style LoadViews fill:#e1f5ff
-style BuildResult fill:#e8f5e9
-" />
+<Diagram lang="mermaid" path="flow/inner-chat/uc2-get-messages.mmd" alt="Use Case 2: Get Chat Messages Flow" />
 
 ### 3. Оновлення статусу прочитаності (UpdateMessageStatus)
 
@@ -124,28 +51,7 @@ style BuildResult fill:#e8f5e9
 **Тригер**: POST /UpdateMessageStatus з UpdateMessageViewDto \
 **Actors**: Авторизований користувач
 
-<Diagram
-lang="mermaid"
-chart="
-flowchart TD
-Start([POST /UpdateMessageStatus]) --> ReceiveIds[Отримати List MessageIds]
-
-ReceiveIds --> GetUserLogin[Отримати поточний UserLogin]
-GetUserLogin --> FindViews[(Знайти MessageViewDb записи)]
-
-FindViews --> FilterByUser[Фільтрація по MessageId та UserLogin]
-FilterByUser --> UpdateViewed[Встановити Viewed = true]
-
-UpdateViewed --> SaveChanges[(Зберегти в БД)]
-SaveChanges --> MapToDto[Конвертувати в MessagesViewedDto]
-
-MapToDto --> ReturnResult[Повернути список оновлених views]
-ReturnResult --> End([200 OK])
-
-style FindViews fill:#e1f5ff
-style SaveChanges fill:#e1f5ff
-style ReturnResult fill:#e8f5e9
-" />
+<Diagram lang="mermaid" path="flow/inner-chat/uc3-update-status.mmd" alt="Use Case 3: Update Message Status Flow" />
 
 ### 4. Оновлення статусу для подій (UpdateMessageStatusForEvent)
 
@@ -153,28 +59,7 @@ style ReturnResult fill:#e8f5e9
 **Тригер**: POST /UpdateMessageStatusForEvent з UpdateMessageViewDto \
 **Actors**: Авторизований користувач
 
-<Diagram
-lang="mermaid"
-chart="
-flowchart TD
-Start([POST /UpdateMessageStatusForEvent]) --> ReceiveIds[Отримати List MessageIds]
-
-ReceiveIds --> GetUserLogin[Отримати поточний UserLogin]
-GetUserLogin --> FindViews[(Знайти MessageViewDb записи)]
-
-FindViews --> FilterByUser[Фільтрація по MessageId та UserLogin]
-FilterByUser --> UpdateEventViewed[Встановити EventViewed = true]
-
-UpdateEventViewed --> SaveChanges[(Зберегти в БД)]
-SaveChanges --> MapToDto[Конвертувати в MessagesViewedDto]
-
-MapToDto --> ReturnResult[Повернути список оновлених views]
-ReturnResult --> End([200 OK])
-
-style FindViews fill:#e1f5ff
-style SaveChanges fill:#e1f5ff
-style ReturnResult fill:#e8f5e9
-" />
+<Diagram lang="mermaid" path="flow/inner-chat/uc4-update-event-status.mmd" alt="Use Case 4: Update Message Status For Event Flow" />
 
 **Примітка**: Відрізняється від UpdateMessageStatus тим, що оновлює EventViewed замість Viewed
 
@@ -184,34 +69,7 @@ style ReturnResult fill:#e8f5e9
 **Тригер**: POST /UploadAttachments з multipart/form-data \
 **Actors**: Авторизований користувач
 
-<Diagram
-lang="mermaid"
-chart="
-flowchart TD
-Start([POST /UploadAttachments]) --> ReceiveFiles[Отримати List IFormFile]
-ReceiveFiles --> ValidateFiles{Валідація файлів}
-ValidateFiles -->|Помилка| ErrorResponse[400 Bad Request]
-
-ValidateFiles -->|Успіх| ProcessFiles[Обробка кожного файлу]
-ProcessFiles --> ReadStream[Читання Stream в byte array]
-ReadStream --> ExtractMetadata[Витягти FileName, FileSize, Type]
-
-ExtractMetadata --> GenerateGuid[Генерація Guid для attachment]
-GenerateGuid --> CreateAttachment[Створити MessageAttachmentDb]
-CreateAttachment --> NullMessageId[MessageId = null на цьому етапі]
-
-NullMessageId --> SaveToDB[(Зберегти attachments в БД)]
-SaveToDB --> MapToDto[Конвертувати в MessageAttachmentDto]
-
-MapToDto --> ReturnIds[Повернути List з Id, FileName, Type]
-ReturnIds --> Success[200 OK]
-
-ErrorResponse --> End([End])
-Success --> End
-
-style SaveToDB fill:#e1f5ff
-style ReturnIds fill:#e8f5e9
-" />
+<Diagram lang="mermaid" path="flow/inner-chat/uc5-save-attachments.mmd" alt="Use Case 5: Save Attachments Flow" />
 
 **Примітка**: Attachment створюється спочатку окремо, потім прив'язується до повідомлення в CreateMessage
 
@@ -221,36 +79,7 @@ style ReturnIds fill:#e8f5e9
 **Тригер**: GET /DownloadAttachment?fileId=\{guid\} \
 **Actors**: Авторизований користувач
 
-<Diagram
-lang="mermaid"
-chart="
-flowchart TD
-Start([GET /DownloadAttachment]) --> ReceiveFileId[Отримати Guid fileId]
-ReceiveFileId --> FindAttachment[(Знайти MessageAttachmentDb)]
-FindAttachment --> AttachmentExists\{Attachment існує?\}
-
-AttachmentExists -->|Ні| Return404[404 Not Found]
-AttachmentExists -->|Так| LoadContent[Завантажити Content byte array]
-
-LoadContent --> GetMetadata[Отримати FileName, Type]
-GetMetadata --> DetermineMimeType[Визначити MIME type]
-
-DetermineMimeType --> SpecialCase\{Спеціальний тип?\}
-SpecialCase -->|.7z| SetCustomMime[application/x-7z-compressed]
-SpecialCase -->|Інший| UseMimeProvider[FileExtensionContentTypeProvider]
-
-SetCustomMime --> CreateModel[Створити AttachmentContentBllModel]
-UseMimeProvider --> CreateModel
-
-CreateModel --> ReturnFile[Повернути File з Content]
-ReturnFile --> Success[200 OK + file stream]
-
-Return404 --> End([End])
-Success --> End
-
-style FindAttachment fill:#e1f5ff
-style ReturnFile fill:#e8f5e9
-" />
+<Diagram lang="mermaid" path="flow/inner-chat/uc6-download-attachment.mmd" alt="Use Case 6: Download Attachment Flow" />
 
 ### 7. Отримання повідомлень для подій (GetMessagesForEvent)
 
@@ -258,32 +87,7 @@ style ReturnFile fill:#e8f5e9
 **Тригер**: POST /GetMessagesForEvent з NotificationSearchDto \
 **Actors**: Авторизований користувач
 
-<Diagram
-lang="mermaid"
-chart="
-flowchart TD
-Start([POST /GetMessagesForEvent]) --> ReceiveSearch[Отримати NotificationSearchDto]
-
-ReceiveSearch --> GetUserLogin[Отримати поточний UserLogin]
-GetUserLogin --> QueryDB[(Складний запит до БД)]
-
-QueryDB --> FilterSubscriptions[Фільтр по підпискам користувача]
-FilterSubscriptions --> FilterUnread[Фільтр по непрочитаним]
-FilterUnread --> JoinEntities[JOIN з Entity для Properties]
-
-JoinEntities --> JoinMessages[JOIN з Messages]
-JoinMessages --> ApplySearch[Застосування NotificationSearchDto фільтрів]
-
-ApplySearch --> LoadData[Завантажити дані]
-LoadData --> MapToNotificationsDto[AutoMapper → NotificationsDto]
-
-MapToNotificationsDto --> ReturnList[Повернути List NotificationsDto]
-ReturnList --> End([200 OK])
-
-style QueryDB fill:#e1f5ff
-style MapToNotificationsDto fill:#fff4e1
-style ReturnList fill:#e8f5e9
-" />
+<Diagram lang="mermaid" path="flow/inner-chat/uc7-get-messages-for-event.mmd" alt="Use Case 7: Get Messages For Event Flow" />
 
 ### 8. Отримання останніх повідомлень (GetLastMessagesForEvent)
 
@@ -291,34 +95,7 @@ style ReturnList fill:#e8f5e9
 **Тригер**: GET /GetLastMessages?count=\{int\} \
 **Actors**: Авторизований користувач
 
-<Diagram
-lang="mermaid"
-chart="
-flowchart TD
-Start([GET /GetLastMessages]) --> ReceiveCount[Отримати count параметр]
-ReceiveCount --> ValidateCount\{count > 0?\}
-ValidateCount -->|Ні| SetDefault[count = PAGE_SIZE default]
-ValidateCount -->|Так| UseCount[Використати count]
-
-SetDefault --> QueryDB
-UseCount --> QueryDB[(Запит до БД)]
-
-QueryDB --> GetUserLogin[Фільтр по UserLogin]
-GetUserLogin --> FilterUnread[EventViewed = false]
-FilterUnread --> OrderByTimestamp[ORDER BY Timestamp DESC]
-
-OrderByTimestamp --> TakeCount[TAKE count]
-TakeCount --> LoadData[Завантажити дані]
-
-LoadData --> MapToNotificationDto[AutoMapper → NotificationDto]
-MapToNotificationDto --> ReturnList[Повернути List NotificationDto]
-
-ReturnList --> End([200 OK])
-
-style QueryDB fill:#e1f5ff
-style MapToNotificationDto fill:#fff4e1
-style ReturnList fill:#e8f5e9
-" />
+<Diagram lang="mermaid" path="flow/inner-chat/uc8-get-last-messages.mmd" alt="Use Case 8: Get Last Messages Flow" />
 
 **Примітка**: Використовується для відображення badge з кількістю непрочитаних
 
@@ -328,27 +105,7 @@ style ReturnList fill:#e8f5e9
 **Тригер**: Internal use (MessageBroker Consumer) \
 **Actors**: SendInnerChatMessageConsumer
 
-<Diagram
-lang="mermaid"
-chart="
-flowchart TD
-Start([SendInnerChatMessageConsumer]) --> ReceiveMessageId[Отримати MessageId з черги]
-ReceiveMessageId --> QueryDB[(Запит GetInnerChatMessage)]
-QueryDB --> LoadMessage[Завантажити ChatMessageDb]
-
-LoadMessage --> IncludeTags[INCLUDE Tags]
-IncludeTags --> IncludeAttachments[INCLUDE Attachments]
-IncludeAttachments --> IncludeEntity[INCLUDE Entity]
-
-IncludeEntity --> ReturnDb[Повернути ChatMessageDb]
-ReturnDb --> ProcessConsumer[Consumer обробляє дані]
-
-ProcessConsumer --> SendNotifications[Відправка нотифікацій]
-SendNotifications --> End([ACK message])
-
-style QueryDB fill:#e1f5ff
-style SendNotifications fill:#fff4e1
-" />
+<Diagram lang="mermaid" path="flow/inner-chat/uc9-get-message-by-id.mmd" alt="Use Case 9: Get Message By ID Flow" />
 
 **Примітка**: Використовується для асинхронної відправки нотифікацій після створення повідомлення
 

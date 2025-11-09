@@ -1,0 +1,33 @@
+flowchart TD
+    Start([Початок: Запит останніх подій]) --> Input[Отримання size параметру]
+    Input --> ValidateSize{size <= 0?}
+    ValidateSize -->|Так| SetDefault[size = 10]
+    ValidateSize -->|Ні| CheckFeature
+    SetDefault --> CheckFeature{UseNewInnerChat feature?}
+    
+    CheckFeature -->|Так| CallNewAPI[HTTP запит до CommercialApi]
+    CheckFeature -->|Ні| CallOldService[Викликати старий InnerChatService]
+    
+    CallNewAPI --> ParallelStart[Паралельне виконання]
+    CallOldService --> ParallelStart
+    
+    ParallelStart --> Task1[GetLastNotifications]
+    ParallelStart --> Task2[GetLastMessages from InnerChat]
+    
+    Task1 --> WaitBoth{Обидва Task завершені?}
+    Task2 --> WaitBoth
+    
+    WaitBoth --> MergeResults[Об'єднати результати в один список]
+    MergeResults --> CheckNotifSuccess{Notifications успішні?}
+    
+    CheckNotifSuccess -->|Так| AddNotifications[Додати notifications до результату]
+    CheckNotifSuccess -->|Ні| CheckChatSuccess
+    AddNotifications --> CheckChatSuccess{InnerChat успішні?}
+    
+    CheckChatSuccess -->|Так| AddMessages[Додати messages до результату]
+    CheckChatSuccess -->|Ні| SortResults
+    AddMessages --> SortResults[Сортувати по Timestamp DESC]
+    
+    SortResults --> TakeSize[Take size елементів]
+    TakeSize --> Success([Успіх: Повернути List NotificationDto])
+    Success --> End([Кінець])

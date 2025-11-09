@@ -1,0 +1,26 @@
+flowchart TD
+    Start([Початок: Targeted notification]) --> Input[Отримання EventDto + userLogins]
+    Input --> ValidateUsers{userLogins не порожній?}
+    
+    ValidateUsers -->|Ні| CallStandard[Викликати SaveMessageAsync без фільтрації]
+    ValidateUsers -->|Так| CreateMessage[Створити NotificationMessageDb]
+    
+    CreateMessage --> ExtractProps[Витягнути Properties]
+    ExtractProps --> QuerySubs[Запит підписок по EventEntity]
+    
+    QuerySubs --> FilterSubmitter[Виключити submitter]
+    FilterSubmitter --> FilterUnsubscribed[Виключити відписаних]
+    FilterUnsubscribed --> FilterByUserLogins[Залишити ТІЛЬКИ з userLogins списку]
+    
+    FilterByUserLogins --> CheckEmpty{Є підписники?}
+    CheckEmpty -->|Ні| ErrorNoSubs[Повернути помилку]
+    CheckEmpty -->|Так| UpdateEntity[Оновити Entity]
+    
+    UpdateEntity --> CreateNotifications[Створити Notification записи]
+    CreateNotifications --> SaveToDB[(Зберегти в БД)]
+    SaveToDB --> UpdateStats[Оновити статистику користувачів]
+    UpdateStats --> Success([Успіх: Повернути NotificationDto])
+    
+    CallStandard --> End([Кінець])
+    ErrorNoSubs --> End
+    Success --> End
