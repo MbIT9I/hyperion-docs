@@ -1,0 +1,512 @@
+---
+title: Внутрішні чати
+description: Модуль внутрішнього чату для кабінету організаторів торгів, що надає можливість користувачам обмінюватися повідомленнями в контексті певних подій (тендерів, лотів тощо).
+icon: Book
+---
+
+# InnerChat Module - Архітектурна Документація
+
+## Огляд проекту
+
+### Технології та патерни:
+- **Архітектура**: Clean Architecture (Abstractions → Application → Infrastructure)
+- **Патерни**: CQRS з використанням MediatR для обробки команд/запитів
+- **ORM**: Entity Framework Core (DbModels з навігаційними властивостями)
+- **Message Broker**: Асинхронна комунікація через RabbitMQ/MassTransit
+- **Mapper**: AutoMapper для перетворення між шарами
+- **Dependency Injection**: Scoped lifetime для сервісів
+
+### Компоненти:
+- **InnerChat.Abstractions** - моделі даних, DTO, enums, запити
+- **InnerChat.Application** - бізнес-логіка, use cases, сервіси
+- **InnerChat.Infrastructure** - API контролери, репозиторії
+
+---
+
+## ERD Діаграма
+
+<Diagram lang="plantuml" path="erd/inner-chat.puml" alt="Entity Relationship Diagram" />
+
+## Use Cases та Flowcharts
+
+### 1. Створення повідомлення (CreateInnerChatMessage)
+
+**Опис**: Користувач створює одне або кілька повідомлень в чаті події \
+**Тригер**: POST /CreateMessages з CreateChatMessagesDto \
+**Actors**: Авторизований користувач, Message Broker, підписники події
+
+<Diagram
+lang="mermaid"
+chart="
+flowchart TD
+Start([POST /CreateMessages]) --> CheckAuth{Користувач авторизований?}
+CheckAuth -->|Ні| Unauthorized[401 Unauthorized]
+CheckAuth -->|Так| GetSubscription[Отримати підписку користувача]
+GetSubscription --> ValidateSubscription{Підписка існує?}
+ValidateSubscription -->|Ні| ReturnNull[Повернути null]
+ValidateSubscription -->|Так| PrepareMessages[Підготовка повідомлень]
+
+PrepareMessages --> GenerateIds[Генерація Guid для повідомлень]
+GenerateIds --> ProcessTags[Обробка тегів User/Lot/Bid/Tender]
+ProcessTags --> ProcessAttachments[Прив'язка вкладень]
+ProcessAttachments --> SetTimestamp[Встановлення timestamp]
+
+SetTimestamp --> SaveToDB[(Збереження в БД)]
+SaveToDB --> SaveMessages[Зберегти ChatMessageDb]
+SaveMessages --> SaveAttachmentLinks[Зберегти зв'язки attachments]
+
+SaveAttachmentLinks --> ExtractTagUsers[Витягнути теговані користувачів]
+ExtractTagUsers --> ExtractParentAuthors[Витягнути авторів батьківських повідомлень]
+
+ExtractParentAuthors --> PublishBroker[Публікація в Message Broker]
+PublishBroker --> PublishAfterCreate[AfterCreateInnerChatMessagesMessage]
+PublishAfterCreate --> PublishNotifications[SendInnerChatMessageMessage для кожного повідомлення]
+
+PublishNotifications --> LoadParents[Завантажити батьківські повідомлення]
+LoadParents --> ReturnResult[Повернути InnerChatMessageDto list]
+ReturnResult --> End([200 OK])
+
+Unauthorized --> EndError([End])
+ReturnNull --> EndError
+
+style SaveToDB fill:#e1f5ff
+style PublishBroker fill:#fff4e1
+style ReturnResult fill:#e8f5e9
+" />
+
+### 2. Отримання повідомлень чату (GetChatMessages)
+
+**Опис**: Завантаження історії повідомлень з пагінацією \
+**Тригер**: POST /GetChatMessages з GetChatMessagesDto \
+**Actors**: Авторизований користувач 
+
+<Diagram
+lang="mermaid"
+chart="
+flowchart TD
+Start([POST /GetChatMessages]) --> ParseRequest[Отримати entityId, entityType, page, size]
+ParseRequest --> GetEntity[(Пошук EventSubscriptionEntity)]
+GetEntity --> EntityExists{Entity існує?}
+
+EntityExists -->|Ні| ReturnEmpty[Повернути порожній результат]
+ReturnEmpty --> EmptyResult[SubscriptionEntityId=Empty, Count=0]
+
+EntityExists -->|Так| CalculatePagination[Розрахунок skip = page-1 * size]
+CalculatePagination --> LoadMessages[(Завантажити повідомлення з БД)]
+
+LoadMessages --> CheckMessages{Повідомлення є?}
+CheckMessages -->|Ні| ReturnEmptyWithId[SubscriptionEntityId заповнено, Messages=empty]
+
+CheckMessages -->|Так| ConvertToDto[Конвертація ChatMessageDb → InnerChatMessageDto]
+ConvertToDto --> LoadTags[Завантажити Tags]
+LoadTags --> LoadAttachments[Завантажити Attachments без Content]
+LoadAttachments --> LoadViews[(Завантажити MessageViews для користувача)]
+
+LoadViews --> SetViewedFlags[Встановити IsViewed flags]
+SetViewedFlags --> LoadParents[(Завантажити ParentMessages)]
+
+LoadParents --> GetCounts[Отримати MessagesCount та UnreadCount]
+GetCounts --> BuildResult[Створити InnerChatMessagesDto]
+
+BuildResult --> Success[200 OK з Messages]
+EmptyResult --> Success
+ReturnEmptyWithId --> Success
+Success --> End([End])
+
+style LoadMessages fill:#e1f5ff
+style LoadViews fill:#e1f5ff
+style BuildResult fill:#e8f5e9
+" />
+
+### 3. Оновлення статусу прочитаності (UpdateMessageStatus)
+
+**Опис**: Позначення повідомлень як прочитаних користувачем \
+**Тригер**: POST /UpdateMessageStatus з UpdateMessageViewDto \
+**Actors**: Авторизований користувач
+
+<Diagram
+lang="mermaid"
+chart="
+flowchart TD
+Start([POST /UpdateMessageStatus]) --> ReceiveIds[Отримати List MessageIds]
+
+ReceiveIds --> GetUserLogin[Отримати поточний UserLogin]
+GetUserLogin --> FindViews[(Знайти MessageViewDb записи)]
+
+FindViews --> FilterByUser[Фільтрація по MessageId та UserLogin]
+FilterByUser --> UpdateViewed[Встановити Viewed = true]
+
+UpdateViewed --> SaveChanges[(Зберегти в БД)]
+SaveChanges --> MapToDto[Конвертувати в MessagesViewedDto]
+
+MapToDto --> ReturnResult[Повернути список оновлених views]
+ReturnResult --> End([200 OK])
+
+style FindViews fill:#e1f5ff
+style SaveChanges fill:#e1f5ff
+style ReturnResult fill:#e8f5e9
+" />
+
+### 4. Оновлення статусу для подій (UpdateMessageStatusForEvent)
+
+**Опис**: Позначення повідомлень як переглянутих в event нотифікаціях \
+**Тригер**: POST /UpdateMessageStatusForEvent з UpdateMessageViewDto \
+**Actors**: Авторизований користувач
+
+<Diagram
+lang="mermaid"
+chart="
+flowchart TD
+Start([POST /UpdateMessageStatusForEvent]) --> ReceiveIds[Отримати List MessageIds]
+
+ReceiveIds --> GetUserLogin[Отримати поточний UserLogin]
+GetUserLogin --> FindViews[(Знайти MessageViewDb записи)]
+
+FindViews --> FilterByUser[Фільтрація по MessageId та UserLogin]
+FilterByUser --> UpdateEventViewed[Встановити EventViewed = true]
+
+UpdateEventViewed --> SaveChanges[(Зберегти в БД)]
+SaveChanges --> MapToDto[Конвертувати в MessagesViewedDto]
+
+MapToDto --> ReturnResult[Повернути список оновлених views]
+ReturnResult --> End([200 OK])
+
+style FindViews fill:#e1f5ff
+style SaveChanges fill:#e1f5ff
+style ReturnResult fill:#e8f5e9
+" />
+
+**Примітка**: Відрізняється від UpdateMessageStatus тим, що оновлює EventViewed замість Viewed
+
+### 5. Збереження вкладень (SaveAttachments)
+
+**Опис**: Завантаження файлів до створення повідомлення \
+**Тригер**: POST /UploadAttachments з multipart/form-data \
+**Actors**: Авторизований користувач
+
+<Diagram
+lang="mermaid"
+chart="
+flowchart TD
+Start([POST /UploadAttachments]) --> ReceiveFiles[Отримати List IFormFile]
+ReceiveFiles --> ValidateFiles{Валідація файлів}
+ValidateFiles -->|Помилка| ErrorResponse[400 Bad Request]
+
+ValidateFiles -->|Успіх| ProcessFiles[Обробка кожного файлу]
+ProcessFiles --> ReadStream[Читання Stream в byte array]
+ReadStream --> ExtractMetadata[Витягти FileName, FileSize, Type]
+
+ExtractMetadata --> GenerateGuid[Генерація Guid для attachment]
+GenerateGuid --> CreateAttachment[Створити MessageAttachmentDb]
+CreateAttachment --> NullMessageId[MessageId = null на цьому етапі]
+
+NullMessageId --> SaveToDB[(Зберегти attachments в БД)]
+SaveToDB --> MapToDto[Конвертувати в MessageAttachmentDto]
+
+MapToDto --> ReturnIds[Повернути List з Id, FileName, Type]
+ReturnIds --> Success[200 OK]
+
+ErrorResponse --> End([End])
+Success --> End
+
+style SaveToDB fill:#e1f5ff
+style ReturnIds fill:#e8f5e9
+" />
+
+**Примітка**: Attachment створюється спочатку окремо, потім прив'язується до повідомлення в CreateMessage
+
+### 6. Завантаження вкладення (DownloadAttachment)
+
+**Опис**: Отримання файлу вкладення за Id \
+**Тригер**: GET /DownloadAttachment?fileId=\{guid\} \
+**Actors**: Авторизований користувач
+
+<Diagram
+lang="mermaid"
+chart="
+flowchart TD
+Start([GET /DownloadAttachment]) --> ReceiveFileId[Отримати Guid fileId]
+ReceiveFileId --> FindAttachment[(Знайти MessageAttachmentDb)]
+FindAttachment --> AttachmentExists\{Attachment існує?\}
+
+AttachmentExists -->|Ні| Return404[404 Not Found]
+AttachmentExists -->|Так| LoadContent[Завантажити Content byte array]
+
+LoadContent --> GetMetadata[Отримати FileName, Type]
+GetMetadata --> DetermineMimeType[Визначити MIME type]
+
+DetermineMimeType --> SpecialCase\{Спеціальний тип?\}
+SpecialCase -->|.7z| SetCustomMime[application/x-7z-compressed]
+SpecialCase -->|Інший| UseMimeProvider[FileExtensionContentTypeProvider]
+
+SetCustomMime --> CreateModel[Створити AttachmentContentBllModel]
+UseMimeProvider --> CreateModel
+
+CreateModel --> ReturnFile[Повернути File з Content]
+ReturnFile --> Success[200 OK + file stream]
+
+Return404 --> End([End])
+Success --> End
+
+style FindAttachment fill:#e1f5ff
+style ReturnFile fill:#e8f5e9
+" />
+
+### 7. Отримання повідомлень для подій (GetMessagesForEvent)
+
+**Опис**: Отримання списку повідомлень для відображення в нотифікаціях \
+**Тригер**: POST /GetMessagesForEvent з NotificationSearchDto \
+**Actors**: Авторизований користувач
+
+<Diagram
+lang="mermaid"
+chart="
+flowchart TD
+Start([POST /GetMessagesForEvent]) --> ReceiveSearch[Отримати NotificationSearchDto]
+
+ReceiveSearch --> GetUserLogin[Отримати поточний UserLogin]
+GetUserLogin --> QueryDB[(Складний запит до БД)]
+
+QueryDB --> FilterSubscriptions[Фільтр по підпискам користувача]
+FilterSubscriptions --> FilterUnread[Фільтр по непрочитаним]
+FilterUnread --> JoinEntities[JOIN з Entity для Properties]
+
+JoinEntities --> JoinMessages[JOIN з Messages]
+JoinMessages --> ApplySearch[Застосування NotificationSearchDto фільтрів]
+
+ApplySearch --> LoadData[Завантажити дані]
+LoadData --> MapToNotificationsDto[AutoMapper → NotificationsDto]
+
+MapToNotificationsDto --> ReturnList[Повернути List NotificationsDto]
+ReturnList --> End([200 OK])
+
+style QueryDB fill:#e1f5ff
+style MapToNotificationsDto fill:#fff4e1
+style ReturnList fill:#e8f5e9
+" />
+
+### 8. Отримання останніх повідомлень (GetLastMessagesForEvent)
+
+**Опис**: Швидке отримання N останніх непрочитаних повідомлень \
+**Тригер**: GET /GetLastMessages?count=\{int\} \
+**Actors**: Авторизований користувач
+
+<Diagram
+lang="mermaid"
+chart="
+flowchart TD
+Start([GET /GetLastMessages]) --> ReceiveCount[Отримати count параметр]
+ReceiveCount --> ValidateCount\{count > 0?\}
+ValidateCount -->|Ні| SetDefault[count = PAGE_SIZE default]
+ValidateCount -->|Так| UseCount[Використати count]
+
+SetDefault --> QueryDB
+UseCount --> QueryDB[(Запит до БД)]
+
+QueryDB --> GetUserLogin[Фільтр по UserLogin]
+GetUserLogin --> FilterUnread[EventViewed = false]
+FilterUnread --> OrderByTimestamp[ORDER BY Timestamp DESC]
+
+OrderByTimestamp --> TakeCount[TAKE count]
+TakeCount --> LoadData[Завантажити дані]
+
+LoadData --> MapToNotificationDto[AutoMapper → NotificationDto]
+MapToNotificationDto --> ReturnList[Повернути List NotificationDto]
+
+ReturnList --> End([200 OK])
+
+style QueryDB fill:#e1f5ff
+style MapToNotificationDto fill:#fff4e1
+style ReturnList fill:#e8f5e9
+" />
+
+**Примітка**: Використовується для відображення badge з кількістю непрочитаних
+
+### 9. Отримання повідомлення за Id (GetInnerChatMessagesById)
+
+**Опис**: Завантаження конкретного повідомлення \
+**Тригер**: Internal use (MessageBroker Consumer) \
+**Actors**: SendInnerChatMessageConsumer
+
+<Diagram
+lang="mermaid"
+chart="
+flowchart TD
+Start([SendInnerChatMessageConsumer]) --> ReceiveMessageId[Отримати MessageId з черги]
+ReceiveMessageId --> QueryDB[(Запит GetInnerChatMessage)]
+QueryDB --> LoadMessage[Завантажити ChatMessageDb]
+
+LoadMessage --> IncludeTags[INCLUDE Tags]
+IncludeTags --> IncludeAttachments[INCLUDE Attachments]
+IncludeAttachments --> IncludeEntity[INCLUDE Entity]
+
+IncludeEntity --> ReturnDb[Повернути ChatMessageDb]
+ReturnDb --> ProcessConsumer[Consumer обробляє дані]
+
+ProcessConsumer --> SendNotifications[Відправка нотифікацій]
+SendNotifications --> End([ACK message])
+
+style QueryDB fill:#e1f5ff
+style SendNotifications fill:#fff4e1
+" />
+
+**Примітка**: Використовується для асинхронної відправки нотифікацій після створення повідомлення
+
+## Рекомендації
+
+### **Виявлені патерни проектування**: 
+
+CQRS (Command Query Responsibility Segregation)
+
+Чітке розділення команд (Create, Update) і запитів (Get) \
+Використання MediatR для orchestration \
+Repository Pattern 
+
+IInnerChatRepository абстрагує доступ до даних
+Всі DB операції інкапсульовані
+DTO Pattern
+
+Різні моделі для різних шарів (DbModels, DTOs, BllModels)
+Mapper для конвертації
+Unit of Work
+
+Транзакційність через EF Core DbContext
+Publish-Subscribe (Event-Driven)
+
+Message Broker для асинхронної комунікації
+AfterCreateInnerChatMessagesMessage, SendInnerChatMessageMessage
+
+### Потенційні проблеми
+
+**Performance Issues**
+
+⚠️ N+1 Query Problem: Завантаження ParentMessages відбувається окремим запитом після основного. Рекомендація: використати .Include(x => x.ParentMessage) в основному запиті \
+⚠️ Великі Attachments: Content зберігається як byte[] в БД. Для великих файлів краще використовувати Blob Storage (Azure Blob, S3) \
+⚠️ Properties як JSON string: В EventSubscriptionEntityDb.Properties зберігається JSON. Краще використати JSON column type або окрему таблицю
+
+**Concurrency**
+
+❌ Відсутня перевірка optimistic concurrency для одночасного редагування \
+Рекомендація: додати RowVersion або Timestamp для критичних таблиць
+
+**Security**
+
+✅ Authorization через [Authorize] атрибут \
+⚠️ Відсутня перевірка прав доступу до вкладень при завантаженні \
+Рекомендація: перевіряти чи користувач має доступ до entity перед видачею файлу
+
+**Data Consistency**
+
+⚠️ Attachments створюються з MessageId = null, потім оновлюються. Можливі orphaned attachments \
+Рекомендація: Background job для очищення старих непрв'язаних attachments
+
+**Error Handling**
+
+⚠️ В CreateMessages при відсутності підписки повертається null замість ExecutionResult з помилкою \
+Рекомендація: використовувати ExecutionResult.Fail() для консистентності
+
+### Пропозиції щодо оптимізації
+
+Database Indexes
+```sql
+-- Для швидкого пошуку повідомлень
+CREATE INDEX IX_ChatMessage_SubscriptionEntityId_Timestamp 
+ON ChatMessageDb(SubscriptionEntityId, Timestamp DESC);
+
+-- Для підрахунку непрочитаних
+CREATE INDEX IX_MessageView_Subscription_Viewed 
+ON MessageViewDb(SubscriptionId, Viewed, EventViewed);
+
+-- Для пошуку по UserLogin
+CREATE INDEX IX_ChatMessage_UserLogin 
+ON ChatMessageDb(UserLogin);
+```
+
+### Caching Strategy
+
+Кешувати EventSubscriptionEntity (рідко змінюються)
+Redis для distributed caching у мікросервісній архітектурі
+Query Optimization
+```csharp
+// Замість:
+var messages = await GetMessagesAsync();
+var parentIds = messages.Select(x => x.ParentMessageId);
+var parents = await GetMessagesByIds(parentIds);
+
+// Використати:
+var messages = await context.ChatMessages
+    .Include(x => x.ParentMessage)
+    .Include(x => x.Tags)
+    .Include(x => x.Attachments)
+    .AsSplitQuery() // Для великих include
+    .ToListAsync();
+```
+
+### Pagination Improvement
+
+Використати cursor-based pagination замість offset для великих датасетів \
+Повертати nextCursor в відповіді \
+Message Broker Reliability
+
+Додати retry policy для failed messages \
+Dead letter queue для критичних помилок \
+Idempotency для обробки duplicate messages
+
+### Архітектурні покращення
+
+Розглянути CQRS з окремими read models (denormalized) для швидких читань \
+Додати Event Sourcing для audit trail повідомлень \
+Segregація БД: окрема read-only replica для запитів \
+Метрики для моніторингу \
+Час відповіді GetChatMessages (p95, p99) \
+Кількість непрочитаних повідомлень на користувача \
+Розмір attachments (для виявлення аномалій) \
+Message Broker lag (затримка обробки) \
+Database connection pool utilization
+
+### Додаткова інформація
+
+#### Enums
+
+MessageTagType:
+
+User = 0 - Згадка користувача (@mention) \
+Lot = 1 - Посилання на лот \
+Bid = 2 - Посилання на ставку \
+Tender = 3 - Посилання на тендер
+
+InnerChatNotify:
+
+InnerChat = 13 - Загальне повідомлення в чаті \
+InnerChatTagMe = 14 - Користувача згадали \
+InnerChatAnswerMe = 15 - Відповідь на повідомлення користувача 
+
+#### Message Broker Events
+
+AfterCreateInnerChatMessagesMessage:
+```csharp
+{
+    SubscriptionEntityId: Guid,
+    MessageIds: List<Guid>,
+    Timestamp: DateTime,
+    UserLogin: string,
+    TagUsers: List<string>
+}
+```
+
+SendInnerChatMessageMessage:
+```csharp
+{
+    TenderId: int,
+    MessageId: Guid,
+    UserMentions: IEnumerable<string>
+}
+```
+
+### Особливості реалізації
+
+* Self-referencing Messages: ParentMessageId дозволяє створювати threads (відповіді на повідомлення)
+* Dual View Tracking: Viewed (прочитано в чаті) vs EventViewed (побачено в нотифікаціях)
+* Pre-upload Attachments: Файли завантажуються окремо перед створенням повідомлення
+* JSON Properties: EventSubscriptionEntityDb.Properties зберігає додаткові metadata в JSON форматі
+* Tag Value як JSON: Для User tags зберігається ```{login: "username"}``` в JSON форматі

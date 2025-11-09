@@ -1,0 +1,364 @@
+---
+title: Сервіс нотифікаій
+description: System notifications module for managing user subscriptions and real-time alerts
+icon: Book
+---
+# Notifications Module - Архітектурна Документація
+## Огляд проекту
+### Архітектура: 
+Багатошаровий .NET додаток з використанням патерну Repository та Service Layer
+
+### Технології:
+.NET Core / ASP.NET Core
+Entity Framework Core
+AutoMapper
+SignalR (для real-time оповіщень)
+Dependency Injection
+
+### Основні компоненти:
+
+DTO Layer (s_smarttender.DTO) - моделі передачі даних
+Infrastructure Layer (s_smarttender.infrastructure) - база даних та моделі
+Service Layer (s_smarttender.services) - бізнес-логіка
+Gateway - API endpoints та контролери
+
+### Модуль Notifications відповідає за:
+
+Збереження та відображення системних оповіщень
+Інтеграцію з внутрішнім чатом (InnerChat)
+Підписки користувачів на події
+Відстеження статусів переглянутих повідомлень
+
+---
+
+## ERD
+<Diagram lang="plantuml" path="erd/notifications.puml" alt="Entity Relationship Diagram" />
+
+---
+
+## Use Cases
+### 1. SaveMessageAsync - Збереження нового оповіщення
+Опис: Створення та збереження оповіщення для всіх підписаних користувачів на певну сутність (тендер, заявка, контракт)
+
+Тригер: Подія в системі (коментар, зміна статусу, новий бід тощо)
+
+Actors: System, EventSubmitter, Subscribers
+
+<Diagram lang="mermaid" path="flow/notifications/uc1.mmd" alt="Use Case 1" />
+
+---
+
+### 2. GetNotifications - Отримання списку оповіщень з фільтрацією
+Опис: Отримання оповіщень для авторизованого користувача з можливістю фільтрації
+
+Тригер: Запит користувача на перегляд оповіщень
+
+Actors: User (authenticated)
+
+<Diagram
+  lang="mermaid"
+  chart="
+flowchart TD
+    Start([Початок: Запит користувача]) --> Input[Отримання NotificationSearchDto]
+    Input --> CheckTagMe{Filter.TagMe == true?}
+    
+    CheckTagMe -->|Так| ReturnEmpty[Повернути порожній результат]
+    CheckTagMe -->|Ні| GetUserLogin[Отримати login поточного користувача]
+    
+    ReturnEmpty --> End([Кінець])
+    
+    GetUserLogin --> GetSubIds[Отримати SubscriptionEntityIds користувача]
+    GetSubIds --> BuildQuery[Побудувати запит notifications]
+    
+    BuildQuery --> FilterByEntities{SubscriptionEntityIds задано?}
+    FilterByEntities -->|Так| ApplyEntityFilter[Фільтрувати по entities]
+    FilterByEntities -->|Ні| CheckUnviewed
+    ApplyEntityFilter --> CheckUnviewed{Filter.Unviewed задано?}
+    
+    CheckUnviewed -->|Так| ApplyViewedFilter[Фільтрувати по Viewed статусу]
+    CheckUnviewed -->|Ні| ExecuteQuery
+    ApplyViewedFilter --> ExecuteQuery[(Виконати запит до БД)]
+    
+    ExecuteQuery --> GroupBySubscription[Групувати по SubscriptionId]
+    GroupBySubscription --> OrderByTimestamp[Сортувати по Timestamp DESC]
+    OrderByTimestamp --> MapToDto[Map to List NotificationsDto]
+    MapToDto --> Success([Успіх: Повернути NotificationsDto])
+    Success --> End
+"/>
+
+---
+
+### 3. UpdateNotificationStatus - Позначити оповіщення як переглянуті
+Опис: Оновлення статусу переглянутості для вказаних оповіщень
+
+Тригер: Користувач відкриває/переглядає оповіщення
+
+Actors: User (authenticated)
+
+<Diagram
+  lang="mermaid"
+  chart="
+flowchart TD
+    Start([Початок: Користувач переглядає]) --> Input[Отримання UpdateMessageViewDto]
+    Input --> GetLogin[Отримати login користувача]
+    GetLogin --> QueryNotifications[Запит непереглянутих notifications]
+    
+    QueryNotifications --> FilterByUser[Фільтр по UserLogin]
+    FilterByUser --> FilterByIds[Фільтр по MessageIds]
+    FilterByIds --> FilterViewed[Фільтр Viewed = false]
+    
+    FilterViewed --> CheckExists{Знайдено notifications?}
+    CheckExists -->|Ні| ReturnEmpty[Повернути порожній список]
+    CheckExists -->|Так| UpdateLoop[Для кожного notification]
+    
+    UpdateLoop --> SetViewed[Встановити Viewed = true]
+    SetViewed --> SaveChanges[(Зберегти зміни в БД)]
+    
+    SaveChanges --> GroupResults[Групувати по SubscriptionEntityId]
+    GroupResults --> MapToDto[Map to NotificationsViewedDto]
+    MapToDto --> Success([Успіх: Повернути список оновлених])
+    
+    ReturnEmpty --> End([Кінець])
+    Success --> End
+"/>
+
+---
+
+### 4. GetLastEvents - Отримання останніх подій (Notifications + InnerChat)
+Опис: Комбінований запит для отримання останніх подій з двох джерел: оповіщення та внутрішні повідомлення
+
+Тригер: Користувач відкриває розділ "Події" або панель оповіщень
+
+Actors: User (authenticated), NotificationService, InnerChatService
+
+<Diagram
+  lang="mermaid"
+  chart="
+flowchart TD
+    Start([Початок: Запит останніх подій]) --> Input[Отримання size параметру]
+    Input --> ValidateSize{size <= 0?}
+    ValidateSize -->|Так| SetDefault[size = 10]
+    ValidateSize -->|Ні| CheckFeature
+    SetDefault --> CheckFeature{UseNewInnerChat feature?}
+    
+    CheckFeature -->|Так| CallNewAPI[HTTP запит до CommercialApi]
+    CheckFeature -->|Ні| CallOldService[Викликати старий InnerChatService]
+    
+    CallNewAPI --> ParallelStart[Паралельне виконання]
+    CallOldService --> ParallelStart
+    
+    ParallelStart --> Task1[GetLastNotifications]
+    ParallelStart --> Task2[GetLastMessages from InnerChat]
+    
+    Task1 --> WaitBoth{Обидва Task завершені?}
+    Task2 --> WaitBoth
+    
+    WaitBoth --> MergeResults[Об'єднати результати в один список]
+    MergeResults --> CheckNotifSuccess{Notifications успішні?}
+    
+    CheckNotifSuccess -->|Так| AddNotifications[Додати notifications до результату]
+    CheckNotifSuccess -->|Ні| CheckChatSuccess
+    AddNotifications --> CheckChatSuccess{InnerChat успішні?}
+    
+    CheckChatSuccess -->|Так| AddMessages[Додати messages до результату]
+    CheckChatSuccess -->|Ні| SortResults
+    AddMessages --> SortResults[Сортувати по Timestamp DESC]
+    
+    SortResults --> TakeSize[Take size елементів]
+    TakeSize --> Success([Успіх: Повернути List NotificationDto])
+    Success --> End([Кінець])
+"/>
+
+---
+### 5. UpdateEventStatus - Оновлення статусів подій (Notifications + InnerChat)
+Опис: Позначення подій як переглянутих з розподілом по типу події (Notification або InnerChat)
+
+Тригер: Користувач відкриває події або позначає їх як прочитані
+
+Actors: User (authenticated), NotificationService, InnerChatService, SubscriptionService
+<Diagram
+  lang="mermaid"
+  chart="
+flowchart TD
+    Start([Початок: Оновлення статусів]) --> Input[Отримання UpdateEventViewDto]
+    Input --> PrepareCollections[Створити 2 колекції: innerChat та notifications]
+    PrepareCollections --> LoopMessages[Для кожного message в Messages]
+    
+    LoopMessages --> CheckType{EventType == InnerChat?}
+    CheckType -->|Так| AddToInnerChat[Додати MessageId до innerChatMessages]
+    CheckType -->|Ні| AddToNotif[Додати MessageId до notificationMessages]
+    
+    AddToInnerChat --> NextMessage{Ще є messages?}
+    AddToNotif --> NextMessage
+    NextMessage -->|Так| LoopMessages
+    NextMessage -->|Ні| CheckFeature{UseNewInnerChat feature?}
+    
+    CheckFeature -->|Так| CallNewChatAPI[HTTP POST до CommercialApi]
+    CheckFeature -->|Ні| CallOldChat[Викликати InnerChatService]
+    
+    CallNewChatAPI --> ParallelTasks[Паралельне виконання]
+    CallOldChat --> ParallelTasks
+    
+    ParallelTasks --> Task1[UpdateMessageStatusForEvent InnerChat]
+    ParallelTasks --> Task2[UpdateNotificationStatus Notifications]
+    
+    Task1 --> WaitBoth{Обидва Task завершені?}
+    Task2 --> WaitBoth
+    
+    WaitBoth --> UpdateUserStats[UpdateUserStatisticByEntities]
+    UpdateUserStats --> PrepareResults[Створити результуючий словник]
+    
+    PrepareResults --> CheckNotifResult{Notifications успішні?}
+    CheckNotifResult -->|Так| ProcessNotif[Групувати по SubscriptionEntityId]
+    CheckNotifResult -->|Ні| CheckChatResult
+    
+    ProcessNotif --> AddNotifToDict[Додати до словника з EventType=Notification]
+    AddNotifToDict --> CheckChatResult{InnerChat успішні?}
+    
+    CheckChatResult -->|Так| ProcessChat[Групувати по SubscriptionEntityId]
+    CheckChatResult -->|Ні| BuildFinalResult
+    
+    ProcessChat --> AddChatToDict[Додати до словника з EventType=InnerChat]
+    AddChatToDict --> BuildFinalResult[Побудувати List EventsViewedDto]
+    
+    BuildFinalResult --> Success([Успіх: Повернути EventsViewedDto])
+    Success --> End([Кінець])
+"/>
+
+---
+### 6. GetEvents - Отримання подій з фільтрацією (Notifications + InnerChat)
+Опис: Комбінований пошук подій з обох джерел з підтримкою фільтрації
+
+Тригер: Користувач шукає події з певними фільтрами
+
+Actors: User (authenticated), NotificationService, InnerChatService
+
+<Diagram
+  lang="mermaid"
+  chart="
+flowchart TD
+    Start([Початок: Пошук подій]) --> Input[Отримання NotificationSearchDto]
+    Input --> CheckFeature{UseNewInnerChat feature?}
+    
+    CheckFeature -->|Так| PrepareHTTP[Серіалізувати model до JSON]
+    CheckFeature -->|Ні| CallOldService
+    
+    PrepareHTTP --> CallNewAPI[HTTP POST до CommercialApi/GetMessagesForEvent]
+    CallOldService[Викликати InnerChatService.GetMessagesForEvent] --> ParallelStart
+    CallNewAPI --> ParallelStart[Паралельне виконання]
+    
+    ParallelStart --> Task1[GetNotifications з фільтрами]
+    ParallelStart --> Task2[GetMessagesForEvent from InnerChat]
+    
+    Task1 --> WaitBoth{Обидва Task завершені?}
+    Task2 --> WaitBoth
+    
+    WaitBoth --> MergeResults[Створити список notifications]
+    MergeResults --> CheckNotifSuccess{Notifications успішні?}
+    
+    CheckNotifSuccess -->|Так| AddNotifications[Додати до списку]
+    CheckNotifSuccess -->|Ні| CheckChatSuccess
+    AddNotifications --> CheckChatSuccess{InnerChat успішні?}
+    
+    CheckChatSuccess -->|Так| AddMessages[Додати до списку]
+    CheckChatSuccess -->|Ні| GroupByEntity
+    AddMessages --> GroupByEntity[Групувати по SubscriptionEntityId]
+    
+    GroupByEntity --> FlattenMessages[Об'єднати Messages з кожної групи]
+    FlattenMessages --> SortMessages[Сортувати по Timestamp DESC]
+    SortMessages --> BuildResult[Побудувати NotificationsDto для кожної групи]
+    
+    BuildResult --> Success([Успіх: Повернути List NotificationsDto])
+    Success --> End([Кінець])
+"/>
+
+---
+### 7. SaveMessageForUsersAsync - Збереження оповіщення для конкретних користувачів
+Опис: Створення оповіщення тільки для зазначеного списку користувачів замість всіх підписників
+
+Тригер: Система потребує відправити оповіщення тільки певним користувачам
+
+Actors: System, Specific Users List
+
+<Diagram
+  lang="mermaid"
+  chart="
+flowchart TD
+    Start([Початок: Targeted notification]) --> Input[Отримання EventDto + userLogins]
+    Input --> ValidateUsers{userLogins не порожній?}
+    
+    ValidateUsers -->|Ні| CallStandard[Викликати SaveMessageAsync без фільтрації]
+    ValidateUsers -->|Так| CreateMessage[Створити NotificationMessageDb]
+    
+    CreateMessage --> ExtractProps[Витягнути Properties]
+    ExtractProps --> QuerySubs[Запит підписок по EventEntity]
+    
+    QuerySubs --> FilterSubmitter[Виключити submitter]
+    FilterSubmitter --> FilterUnsubscribed[Виключити відписаних]
+    FilterUnsubscribed --> FilterByUserLogins[Залишити ТІЛЬКИ з userLogins списку]
+    
+    FilterByUserLogins --> CheckEmpty{Є підписники?}
+    CheckEmpty -->|Ні| ErrorNoSubs[Повернути помилку]
+    CheckEmpty -->|Так| UpdateEntity[Оновити Entity]
+    
+    UpdateEntity --> CreateNotifications[Створити Notification записи]
+    CreateNotifications --> SaveToDB[(Зберегти в БД)]
+    SaveToDB --> UpdateStats[Оновити статистику користувачів]
+    UpdateStats --> Success([Успіх: Повернути NotificationDto])
+    
+    CallStandard --> End([Кінець])
+    ErrorNoSubs --> End
+    Success --> End
+"/>
+
+---
+## Рекомендації
+
+### Виявлені патерни проектування
+
+* Repository Pattern - доступ до даних через LoggerDbContext 
+* Service Layer Pattern - бізнес-логіка інкапсульована в NotificationService 
+* DTO Pattern - чітке розділення між моделями БД та моделями передачі даних 
+* Dependency Injection - використання DI для всіх залежностей 
+* Feature Toggle Pattern - використання Growthbook для переключення між старою/новою реалізацією InnerChat 
+* Composite Pattern - комбінування результатів Notifications та InnerChat в Events 
+
+### Потенційні проблеми
+
+* N+1 Query Problem - потенційно в методах з Include можуть виникати зайві запити
+* Hard-coded PAGE_SIZE - константа PAGE_SIZE = 10 може бути винесена в конфігурацію
+* TODO коментар - логіка TagMe не реалізована (GetNotifications метод)
+* Dual API calls - паралельні виклики до Notifications + InnerChat можуть уповільнювати відповідь
+* JSON serialization в БД - поле Properties зберігається як JSON string, що ускладнює пошук
+* Відсутність пагінації - в методі GetNotifications немає явної пагінації
+* Exception handling - немає явної обробки помилок HTTP запитів до CommercialApi
+
+### Пропозиції щодо оптимізації
+
+* Кешування - додати кеш для частих запитів (GetLastEvents, GetLastNotifications)
+* Пагінація - реалізувати Skip/Take для великих списків оповіщень
+* Async improvements - використати IAsyncEnumerable для стрімінгу великих результатів
+* Bulk operations - оптимізувати масове оновлення Viewed статусів
+* Circuit Breaker - додати обробку збоїв для HTTP запитів до CommercialApi
+* Event Sourcing - розглянути можливість використання Event Sourcing для історії подій
+* SignalR integration - більш тісна інтеграція з SignalR для real-time оновлень
+* Database indexes - переконатися в наявності індексів на:
+* Notification.SubscriptionId + Viewed
+* NotificationMessage.Timestamp
+* EventSubscription.UserLogin + Unsubscribed
+* Refactoring - винести спільну логіку для Events у окремий EventAggregatorService
+* Monitoring - додати логування та метрики для відстеження продуктивності
+
+### Архітектурні покращення
+
+* CQRS Pattern - розділити команди (Save, Update) та запити (Get) в окремі сервіси
+* Mediator Pattern - використати MediatR для обробки команд/запитів
+* Specification Pattern - винести фільтри в окремі Specification класи
+* Unit of Work - обгорнути транзакції в UnitOfWork патерн
+* Domain Events - використати domain events замість прямих викликів UpdateUserStatistic
+
+|   |   |
+|---|---|
+|Автор аналізу: | Maksumiuk D. |
+|Дата: | 6 листопада 2025 р. |
+|Версія документа: | 1.0 |

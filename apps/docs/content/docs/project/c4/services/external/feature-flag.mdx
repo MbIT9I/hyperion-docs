@@ -1,0 +1,178 @@
+---
+title: GrowthBook Feature Flag Service
+description: Архітектура та інтеграція сервісу керування фіча-флагами
+icon: Book
+---
+
+# GrowthBook Feature Flag Service
+
+## Огляд
+
+GrowthBook — це open-source платформа для керування фіча-флагами та A/B експериментів. Система дозволяє динамічно контролювати функціональність додатку без необхідності деплою коду.
+
+## Архітектура
+
+### Основні компоненти
+
+<Diagram lang="mermaid" path="ext/feature-flag-components.mmd" alt="GrowthBook Feature Flag Architecture" />
+
+### Ключові особливості
+
+#### 1. **SDK Architecture**
+
+- **Локальне обчислення**: SDK оцінює фіча-флаги локально без мережевих запитів
+- **Lightweight**: Мінімальний вплив на продуктивність (~5KB gzipped)
+- **Real-time updates**: Підтримка SSE (Server-Sent Events) для оновлень в реальному часі
+- **Offline-first**: Кешування конфігурації для роботи без підключення до API
+
+#### 2. **Caching Strategy**
+
+```
+┌─────────────┐         ┌──────────────┐         ┌─────────────┐
+│   Browser   │ ────▶   │  Local Cache │ ────▶   │  API Server │
+│  (Runtime)  │         │   (Memory)   │         │ (Features)  │
+└─────────────┘         └──────────────┘         └─────────────┘
+      ▲                         │                        │
+      │                         ▼                        │
+      └─────────────────  Fallback Values  ◀─────────────┘
+                          (No network)
+```
+
+**Рівні кешування:**
+- **L1**: In-memory cache (SDK runtime)
+- **L2**: CDN/Edge cache (optional)
+- **L3**: API response cache
+
+#### 3. **Feature Evaluation Flow**
+
+```
+┌────────────────────────────────────────────────────────┐
+│ 1. Check Local Cache                                   │
+│    ├─ Hit: Return cached value                         │
+│    └─ Miss: Fetch from API                             │
+├────────────────────────────────────────────────────────┤
+│ 2. Evaluate Targeting Rules                            │
+│    ├─ User attributes matching                         │
+│    ├─ Percentage rollout                               │
+│    └─ Environment checks                               │
+├────────────────────────────────────────────────────────┤
+│ 3. Return Feature Value                                │
+│    ├─ Variant A/B/C                                    │
+│    ├─ Boolean on/off                                   │
+│    └─ JSON configuration                               │
+└────────────────────────────────────────────────────────┘
+```
+
+## Інтеграція з тендерним майданчиком
+
+### Використання фіч-флагів
+
+#### 1. **Градуальний розкат функцій**
+```typescript
+// Приклад: Поступове вмикання нової UI
+if (growthbook.isOn("new-tender-ui")) {
+  // Показати новий інтерфейс
+  return <NewTenderUI />;
+}
+// Fallback до старої версії
+return <LegacyTenderUI />;
+```
+
+#### 2. **A/B тестування**
+```typescript
+// Тестування різних алгоритмів ранжування
+const variant = growthbook.getFeatureValue("tender-ranking-algorithm", "default");
+
+switch(variant) {
+  case "ml-based":
+    return mlRankingAlgorithm(tenders);
+  case "price-priority":
+    return pricePriorityRanking(tenders);
+  default:
+    return defaultRanking(tenders);
+}
+```
+
+#### 3. **Таргетинг по ролях**
+```typescript
+// Вмикання функцій для конкретних ролей
+if (growthbook.isOn("advanced-analytics")) {
+  // Доступно тільки для адміністраторів
+  return <AdvancedAnalyticsDashboard />;
+}
+```
+
+### Архітектура інтеграції
+
+<Diagram lang="mermaid" path="ext/feature-flag-integration.mmd" alt="GrowthBook Feature Flag Architecture" />
+
+
+## Переваги використання
+
+### Технічні переваги
+- **Zero latency**: Обчислення на клієнті без додаткових запитів
+- **High availability**: Робота навіть при недоступності API
+- **Privacy-first**: Не передає користувацькі дані на сервер
+- **Type-safe**: Повна підтримка TypeScript
+
+### Бізнес-переваги
+- **Швидкий розкат**: Активація функцій без деплою
+- **Знижений ризик**: Поступове вмикання нових фіч
+- **Data-driven рішення**: A/B тестування з аналітикою
+- **Гнучке таргетування**: За роллю, регіоном, відсотком
+
+## Конфігурація
+
+### Environment Variables
+```
+GROWTHBOOK_API_HOST=https://cdn.growthbook.io
+GROWTHBOOK_CLIENT_KEY=sdk-xxxxxxxxxxxxx
+GROWTHBOOK_ENABLE_STREAMING=true
+```
+
+### SDK Initialization
+```typescript
+import { GrowthBook } from "@growthbook/growthbook-react";
+
+const gb = new GrowthBook({
+  apiHost: process.env.GROWTHBOOK_API_HOST,
+  clientKey: process.env.GROWTHBOOK_CLIENT_KEY,
+  enableDevMode: process.env.NODE_ENV === "development",
+  subscribeToChanges: true, // Real-time updates
+  trackingCallback: (experiment, result) => {
+    // Інтеграція з аналітикою
+    analytics.track("Experiment Viewed", {
+      experimentId: experiment.key,
+      variationId: result.variationId,
+    });
+  },
+});
+```
+
+## Моніторинг та метрики
+
+### Ключові показники
+- **Feature adoption rate**: % користувачів з новими фічами
+- **Experiment conversion**: Результати A/B тестів
+- **SDK performance**: Час ініціалізації та обчислення
+- **Cache hit rate**: Ефективність кешування
+
+### Dashboard Integration
+- Перегляд активних експериментів
+- Моніторинг розкату фіч
+- Аналіз результатів тестування
+- Управління таргетингом
+
+## Best Practices
+
+1. **Fallback values**: Завжди визначайте значення за замовчуванням
+2. **Feature naming**: Використовуйте kebab-case (`new-tender-ui`)
+3. **Gradual rollout**: Починайте з 5-10% користувачів
+4. **Cleanup**: Видаляйте старі флаги після повного розкату
+5. **Testing**: Тестуйте обидва стани (on/off) кожної фічі
+
+## Посилання
+
+- [GrowthBook Documentation](https://docs.growthbook.io/)
+- [React SDK Guide](https://docs.growthbook.io/lib/react)
+- [Feature Flag Best Practices](https://docs.growthbook.io/guide/feature-flag-best-practices)

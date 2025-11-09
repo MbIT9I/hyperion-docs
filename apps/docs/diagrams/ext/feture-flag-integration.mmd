@@ -1,0 +1,23 @@
+sequenceDiagram
+    participant User
+    participant Frontend
+    participant SDK
+    participant Cache
+    participant GrowthBook
+    
+    User->>Frontend: Відкриває сторінку
+    Frontend->>SDK: Initialize SDK
+    SDK->>Cache: Check cache
+    
+    alt Cache hit
+        Cache-->>SDK: Return features
+    else Cache miss
+        SDK->>GrowthBook: Fetch features
+        GrowthBook-->>SDK: Features config
+        SDK->>Cache: Update cache
+    end
+    
+    SDK-->>Frontend: Features ready
+    Frontend->>SDK: Check feature("new-ui")
+    SDK-->>Frontend: true/false
+    Frontend->>User: Render appropriate UI

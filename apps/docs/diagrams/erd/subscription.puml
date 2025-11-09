@@ -1,0 +1,47 @@
+@startuml
+!include subscription.puml
+
+package "Subscription Service" as SubscriptionService {
+  entity "EventSubscriptionEntity" as EventSubscriptionEntity {
+    * **Id : Guid** <<PK>>
+    --
+    * EntityType : EntityType(short)
+    * EntityId : String
+    Properties : String <<JSON>>
+    Owner : String
+  }
+
+  entity "EventSubscription" as EventSubscription {
+    * **Id : Guid** <<PK>>
+    --
+    * SubscriptionEntityId : Guid <<FK>>
+    * UserLogin : String
+    * Unsubscribed : Boolean
+    * Muted : Boolean
+  }
+
+  entity "EventSubscriptionStatistic" as EventSubscriptionStatistic {
+    * **EventSubscriptionId : Guid** <<PK,FK>>
+    --
+    * HasTagMe : Boolean
+    * HasNewEvent : Boolean
+    LastEventDate : DateTime?
+  }
+
+  ' Enumerations
+  enum EntityTypes {
+    Tender = 1
+    Application = 2
+    Contract = 3
+  }
+
+  ' Subscription relationships
+  EventSubscriptionStatistic::Id ||--o{ EventSubscription::SubscriptionEntityId : "has subscriptions"
+  EventSubscription::Id ||--|| EventSubscriptionStatistic::EventSubscriptionId : "has statistic"
+  EventSubscription::EntityId ||--|| EventSubscriptionEntity::Id : "refers to"
+
+  ' Enum relationships (dashed)
+  EventSubscriptionEntity::EntityType }o..|| EntityTypes : "uses"
+}
+
+@enduml

@@ -1,0 +1,304 @@
+---
+title: Mailer Service
+description: Архітектура та інтеграція сервісу розсилки електронної пошти
+icon: Book
+---
+
+# Mailer Service
+
+## Огляд
+
+Mailer Service — це спеціалізований сервіс для надійної розсилки електронної пошти. Система забезпечує доставку транзакційних листів, нотифікацій та маркетингових повідомлень з високою надійністю та можливістю відстеження.
+
+## Архітектура
+
+### Основні компоненти
+
+```
+┌─────────────────┐      ┌──────────────┐      ┌─────────────┐
+│   Application   │ ───▶ │ Message Queue│ ───▶ │   Mailer    │
+│    Backend      │      │   (RabbitMQ) │      │   Service   │
+└─────────────────┘      └──────────────┘      └─────────────┘
+                                                       │
+                         ┌─────────────────────────────┼─────────────┐
+                         ▼                             ▼             ▼
+                  ┌─────────────┐           ┌──────────────┐  ┌──────────┐
+                  │  SMTP Server│           │   Template   │  │  Webhook │
+                  │  (SendGrid/ │           │    Engine    │  │  Handler │
+                  │   Mailgun)  │           │  (Handlebars)│  │          │
+                  └─────────────┘           └──────────────┘  └──────────┘
+```
+
+### Ключові особливості
+
+#### 1. **Queue-Based Architecture**
+
+- **Асинхронна обробка**: Листи відправляються в черзі без блокування основного потоку
+- **Retry mechanism**: Автоматичні повторні спроби при помилках
+- **Priority queues**: Різні пріоритети для транзакційних і маркетингових листів
+- **Rate limiting**: Контроль швидкості відправки для уникнення блокувань
+
+#### 2. **Delivery Flow**
+
+```
+┌────────────────────────────────────────────────────────┐
+│ 1. Email Request                                       │
+│    ├─ Validate recipient & content                     │
+│    ├─ Check anti-spam rules                            │
+│    └─ Enqueue message                                  │
+├────────────────────────────────────────────────────────┤
+│ 2. Template Processing                                 │
+│    ├─ Load email template                              │
+│    ├─ Inject dynamic data                              │
+│    └─ Render HTML & plain text                         │
+├────────────────────────────────────────────────────────┤
+│ 3. Delivery Attempt                                    │
+│    ├─ Select SMTP provider                             │
+│    ├─ Send via API                                     │
+│    └─ Handle delivery status                           │
+├────────────────────────────────────────────────────────┤
+│ 4. Status Tracking                                     │
+│    ├─ Delivered / Bounced / Opened                     │
+│    ├─ Click tracking                                   │
+│    └─ Webhook notifications                            │
+└────────────────────────────────────────────────────────┘
+```
+
+#### 3. **Template System**
+
+```typescript
+// Структура шаблону
+{
+  "template_id": "tender-notification",
+  "subject": "Новий тендер: {{tender.title}}",
+  "html": "<div>...</div>",
+  "plaintext": "...",
+  "variables": ["tender.title", "tender.deadline", "user.name"]
+}
+```
+
+**Типи шаблонів:**
+- **Transactional**: Підтвердження реєстрації, скидання паролю
+- **Notifications**: Оновлення тендерів, повідомлення про ставки
+- **Marketing**: Анонси, розсилки, дайджести
+- **System**: Звіти, алерти для адміністраторів
+
+## Інтеграція з тендерним майданчиком
+
+### Сценарії використання
+
+#### 1. **Реєстрація користувача**
+```typescript
+await mailer.send({
+  template: "user-welcome",
+  to: user.email,
+  data: {
+    userName: user.name,
+    verificationLink: generateVerificationLink(user.id),
+    expiresIn: "24 години"
+  },
+  priority: "high"
+});
+```
+
+#### 2. **Нотифікація про новий тендер**
+```typescript
+// Масова розсилка підписникам
+const subscribers = await getSubscribersByCategory(tender.category);
+
+await mailer.sendBulk({
+  template: "new-tender-notification",
+  recipients: subscribers.map(s => s.email),
+  data: {
+    tender: {
+      title: tender.title,
+      deadline: tender.deadline,
+      budget: tender.budget,
+      link: getTenderLink(tender.id)
+    }
+  },
+  priority: "normal",
+  batchSize: 100 // Відправка по 100 листів за раз
+});
+```
+
+#### 3. **Оновлення статусу тендеру**
+```typescript
+await mailer.send({
+  template: "tender-status-update",
+  to: tender.owner.email,
+  data: {
+    tenderTitle: tender.title,
+    oldStatus: "draft",
+    newStatus: "published",
+    actionRequired: false
+  },
+  tags: ["tender-updates", "status-change"]
+});
+```
+
+#### 4. **Денні дайджести**
+```typescript
+// Scheduled job
+await mailer.send({
+  template: "daily-digest",
+  to: user.email,
+  data: {
+    newTenders: getNewTendersCount(),
+    activeBids: getUserActiveBids(user.id),
+    expiringTenders: getExpiringTenders(user.watchlist),
+    recommendations: getRecommendedTenders(user.profile)
+  },
+  priority: "low",
+  scheduleAt: "08:00" // Відправка о 8 ранку
+});
+```
+
+### Архітектура інтеграції
+
+```
+┌──────────────────┐
+│  Tender Service  │
+└────────┬─────────┘
+         │ Emit Event
+         ▼
+┌──────────────────┐      ┌─────────────────┐
+│  Event Bus       │ ───▶ │  Email Worker   │
+│  (EventEmitter)  │      │  (Subscription) │
+└──────────────────┘      └────────┬────────┘
+                                   │
+                                   ▼
+                          ┌─────────────────┐
+                          │ Mailer Service  │
+                          │   (Queue Job)   │
+                          └─────────────────┘
+```
+
+## Переваги використання
+
+### Технічні переваги
+- **High deliverability**: Використання перевірених SMTP провайдерів (99%+ delivery rate)
+- **Scalability**: Обробка тисяч листів за хвилину через черги
+- **Fault tolerance**: Автоматичне відновлення після збоїв
+- **Observability**: Повний трекінг статусів доставки
+
+### Бізнес-переваги
+- **Engagement tracking**: Відстеження відкриттів та кліків
+- **A/B testing**: Тестування різних варіантів листів
+- **Персоналізація**: Динамічний контент на основі даних користувача
+- **Compliance**: Підтримка GDPR та інших регуляцій
+
+## Конфігурація
+
+### Environment Variables
+```bash
+MAILER_SERVICE_URL=http://mailer:3000
+MAILER_API_KEY=secret_key_xxxxxxxxxxxxx
+MAILER_DEFAULT_FROM=noreply@tender-platform.com
+MAILER_DEFAULT_REPLY_TO=support@tender-platform.com
+
+# SMTP Provider Configuration
+SMTP_PROVIDER=sendgrid # або mailgun, ses
+SENDGRID_API_KEY=SG.xxxxxxxxxxxxx
+SMTP_HOST=smtp.sendgrid.net
+SMTP_PORT=587
+
+# Queue Configuration
+RABBITMQ_URL=amqp://rabbitmq:5672
+EMAIL_QUEUE_NAME=emails
+EMAIL_RETRY_ATTEMPTS=3
+EMAIL_RETRY_DELAY=60000 # 1 хвилина
+```
+
+### Service Integration
+```typescript
+import { MailerClient } from "@/lib/mailer";
+
+const mailer = new MailerClient({
+  apiUrl: process.env.MAILER_SERVICE_URL,
+  apiKey: process.env.MAILER_API_KEY,
+  defaultFrom: process.env.MAILER_DEFAULT_FROM,
+  timeout: 5000,
+});
+
+// Відправка листа
+const result = await mailer.send({
+  template: "template-name",
+  to: "user@example.com",
+  data: { /* template variables */ },
+  attachments: [
+    {
+      filename: "document.pdf",
+      content: buffer,
+      contentType: "application/pdf"
+    }
+  ]
+});
+
+// Перевірка статусу
+const status = await mailer.getDeliveryStatus(result.messageId);
+```
+
+## Моніторинг та метрики
+
+### Ключові показники
+- **Delivery rate**: % успішно доставлених листів (target: &gt;98%)
+- **Bounce rate**: % листів що повернулись (target: &lt;2%)
+- **Open rate**: % відкритих листів
+- **Click-through rate**: % кліків по посиланнях
+- **Queue depth**: Кількість листів в черзі
+- **Processing time**: Середній час обробки листа
+
+### Алерти
+- Різке зростання bounce rate (&gt;5%)
+- Черга перевищує 10,000 повідомлень
+- SMTP provider недоступний
+- Delivery rate падає нижче 95%
+
+### Dashboard Metrics
+```typescript
+{
+  "last_24h": {
+    "sent": 15420,
+    "delivered": 15234,
+    "bounced": 186,
+    "opened": 8345,
+    "clicked": 2103,
+    "delivery_rate": "98.8%",
+    "open_rate": "54.8%",
+    "ctr": "13.6%"
+  }
+}
+```
+
+## Best Practices
+
+1. **Валідація email адрес**: Перевірка формату перед відправкою
+2. **Unsubscribe links**: Обов'язкові посилання для відписки в маркетингових листах
+3. **Rate limiting**: Не перевищувати ліміти SMTP провайдера
+4. **Template testing**: Тестування шаблонів перед production
+5. **Plain text версії**: Завжди включати текстову версію листа
+6. **SPF/DKIM/DMARC**: Налаштування DNS записів для автентифікації
+7. **Bounce handling**: Автоматична обробка hard/soft bounces
+8. **List hygiene**: Регулярне очищення списків від неактивних адрес
+
+## Безпека
+
+### Захист від зловживань
+- **Rate limiting**: Обмеження кількості листів на користувача
+- **Content filtering**: Перевірка на спам та фішинг
+- **Recipient validation**: Блокування підозрілих доменів
+- **Queue monitoring**: Виявлення аномальної активності
+
+### Конфіденційність
+- **Encrypted connections**: TLS для всіх SMTP з'єднань
+- **Data retention**: Автоматичне видалення даних після N днів
+- **PII protection**: Шифрування персональних даних в черзі
+- **Audit logs**: Логування всіх операцій відправки
+
+## Посилання
+
+- [SendGrid API Documentation](https://docs.sendgrid.com/)
+- [Mailgun API Documentation](https://documentation.mailgun.com/)
+- [Email Best Practices](https://www.sparkpost.com/resources/email-best-practices/)
+- [GDPR Email Compliance](https://gdpr.eu/email-encryption/)

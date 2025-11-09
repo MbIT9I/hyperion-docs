@@ -1,0 +1,25 @@
+graph TD
+    %% Users
+    Admin["<a href='../glossary/administrator'>Administrator</a>"]
+    Manager["<a href='../glossary/manager'>Менеджер фронт-офіс</a>"]
+    Organizer["<a href='../glossary/organizer'>Організатор</a>"]
+    Supplier["<a href='../glossary/supplier'>Постачальник</a>"]
+
+    %% Main System
+    Main["<a href='c2'>Тендерний майданчик</a>"]
+
+    %% External Systems
+    OAuth["<a href='services/external/oauth'>Сервіс авторизації</a>"]
+    Mailer["<a href='services/external/mailer'>Сервіс відправки пошти</a>"]
+    FeatureFlag["<a href='services/external/feature-flag'>Сервіс фіч-флагів</a>"]
+
+    %% Relationships
+    Admin --> Main
+    Manager --> Main
+    Organizer --> Main
+    Supplier --> Main
+
+    %% System to External Systems
+    Main --> OAuth
+    Main --> Mailer
+    Main --> FeatureFlag

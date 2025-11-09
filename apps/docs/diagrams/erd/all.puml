@@ -1,0 +1,16 @@
+@startuml
+
+' Styling
+' skinparam linetype ortho
+skinparam packageStyle rectangle
+
+!include subscription.puml
+!include notifications.puml
+!include inner-chat.puml
+
+EventSubscriptionStatistic::Id ||--o{ ChatMessage::SubscriptionEntityId : "contains messages"
+EventSubscription::Id ||--o{ MessageView::SubscriptionId : "tracks views"
+EventSubscription::SubscriptionId ||--o{ Notification::SubscriptionId : "tracks notifications"
+
+
+@enduml

@@ -1,0 +1,7 @@
+{
+  "title": "ADRs",
+  "pages": [
+    "index",
+    "feature-flags"
+  ]
+}

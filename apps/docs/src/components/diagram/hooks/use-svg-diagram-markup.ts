@@ -78,13 +78,35 @@ export const useSvgDiagramMarkup = ({ lang, path, chart }: DiagramParamsBase) =>
           startOnLoad: false,
           securityLevel: 'loose',
           fontFamily: 'inherit',
-          themeCSS: 'margin: 1.5rem auto 0;',
           theme: 'default',
+          themeCSS: `
+            .edgeLabel { color: #000 !important; fill: #000 !important; }
+            .edgeLabel rect { fill: #fff !important; }
+            .label { color: #000 !important; fill: #000 !important; }
+            text { fill: #000 !important; }
+            .messageText { fill: #000 !important; stroke: none !important; }
+            .labelText { fill: #000 !important; }
+            .loopText { fill: #000 !important; }
+            .loopLine { stroke: #000 !important; }
+            .actor { fill: #fff !important; stroke: #000 !important; }
+            .activation0, .activation1, .activation2 { fill: #f4f4f4 !important; stroke: #666 !important; }
+          `,
         });
 
         const { svg: mermaidSvg } = await mermaid.render(id, mermaidCode.replaceAll('\\n', '\n'));
 
-        setSvg(mermaidSvg);
+        // Додаємо стилі для посилань після рендерингу
+        const styledSvg = mermaidSvg.replace(
+          '</style>',
+          `
+          a, a *, a text, a tspan { fill: #0366d6 !important; color: #0366d6 !important; }
+          .label a, .label a * { fill: #0366d6 !important; }
+          .nodeLabel a, .nodeLabel a * { fill: #0366d6 !important; }
+          foreignObject a { color: #0366d6 !important; }
+          </style>`
+        );
+
+        setSvg(styledSvg);
         setIsLoading(false);
       } catch (error) {
         console.error('Error while rendering mermaid', error);

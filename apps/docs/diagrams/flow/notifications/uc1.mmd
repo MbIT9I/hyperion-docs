@@ -1,0 +1,28 @@
+flowchart TD
+    Start([Початок: Подія в системі]) --> Input[Отримання EventDto з даними події]
+    Input --> ValidateEvent{Перевірка submitter}
+    
+    ValidateEvent --> CreateMessage[Створити NotificationMessageDb]
+    CreateMessage --> ExtractProps[Витягнути Properties з Event об'єкта]
+    ExtractProps --> QuerySubs[Запит підписок по EventEntity]
+    
+    QuerySubs --> FilterSubs[Фільтрація підписок]
+    FilterSubs --> FilterLogin[Виключити автора події]
+    FilterLogin --> FilterUnsubscribed[Виключити відписаних]
+    FilterUnsubscribed --> FilterUserLogins{userLogins передано?}
+    
+    FilterUserLogins -->|Так| FilterByUsers[Залишити тільки зазначених користувачів]
+    FilterUserLogins -->|Ні| CheckEmpty{Є підписники?}
+    FilterByUsers --> CheckEmpty
+    
+    CheckEmpty -->|Ні| ErrorNoSubs[Повернути помилку: No subscribers]
+    CheckEmpty -->|Так| UpdateEntity[Оновити Entity Properties & Owner]
+    
+    UpdateEntity --> CreateNotifications[Створити Notification для кожного підписника]
+    CreateNotifications --> SaveToDB[(Зберегти в БД)]
+    SaveToDB --> UpdateStats[Оновити статистику користувачів]
+    UpdateStats --> MapResult[Map NotificationDb to NotificationDto]
+    MapResult --> Success([Успіх: Повернути NotificationDto])
+    
+    ErrorNoSubs --> End([Кінець])
+    Success --> End  

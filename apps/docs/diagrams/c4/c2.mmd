@@ -1,0 +1,37 @@
+graph TD;
+    %% Users
+    Admin[<a href='../glossary/administrator'>Administrator</a>];
+    Manager[<a href='../glossary/manager'>Менеджер фронт-офіс</a>];
+    Organizer[<a href='../glossary/organizer'>Організатор</a>];
+    Supplier[<a href='../glossary/supplier'>Постачальник</a>];
+    
+    %% Website System
+    subgraph WebsiteSystem [Website System]
+        WebsiteClient[<a href='services/website-client'>🌐 Web Site Client</a>]
+        WebBFF[<a href='services/website-bff'>⚡ Web Site BFF</a>]
+    end
+
+    %% SPA System
+    subgraph SPA [SPA System]
+        SPAapp[<a href='services/spa-client'>🌐 Web Site Client<br/>Frontend</a>]
+        SPABff[<a href='services/spa-bff'>⚡ Web Site BFF<br/>BFF</a>]
+    end
+
+    %%Actor to BackOffice
+    Admin --> ERPSystem
+    Manager --> ERPSystem
+    
+    %%Actor to Organizer
+    Organizer --> SPAapp
+    SPAapp --> SPABff
+
+    %%Actor to Supplier
+    Supplier --> WebsiteClient
+    WebsiteClient --> WebBFF
+
+    SPABff --> Services
+    WebBFF --> Services
+
+    %% Backend System
+    Services[<a href='c3-1'>Backend System</a>]
+    ERPSystem[<a href='c3-2'>ERP System</a>]

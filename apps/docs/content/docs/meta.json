@@ -2,10 +2,12 @@
   "title": "Documentation",
   "pages": [
     "index",
-    "---Guides---",
+    "--- Commercial ---",
+    "project",
+    "--- Guides ---",
     "quick-start",
     "diagramming",
-    "---OpenAPI---",
+    "--- OpenAPI ---",
     "openapi"
   ]
 }

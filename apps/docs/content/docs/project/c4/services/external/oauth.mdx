@@ -1,0 +1,563 @@
+---
+title: OAuth Service
+description: Архітектура та інтеграція сервісу OAuth аутентифікації
+icon: Book
+---
+
+# OAuth Service
+
+## Огляд
+
+OAuth Service — це централізований сервіс аутентифікації та авторизації, побудований на базі Microsoft .NET. Система забезпечує безпечний доступ до ресурсів тендерного майданчику через стандартний протокол OAuth 2.0 та OpenID Connect.
+
+## Архітектура
+
+### Основні компоненти
+
+```
+┌─────────────────┐      ┌──────────────┐      ┌─────────────┐
+│  Client App     │ ───▶ │ OAuth Server │ ───▶ │  Identity   │
+│  (Frontend)     │      │   (.NET 8)   │      │  Provider   │
+└─────────────────┘      └──────────────┘      └─────────────┘
+         │                       │                      │
+         │                       ▼                      │
+         │              ┌──────────────┐                │
+         │              │ Token Store  │                │
+         │              │  (Redis)     │                │
+         │              └──────────────┘                │
+         │                       │                      │
+         ▼                       ▼                      ▼
+┌─────────────────┐      ┌──────────────┐      ┌─────────────┐
+│  Resource API   │      │  Refresh     │      │  User Store │
+│  (Protected)    │      │  Token Flow  │      │  (Database) │
+└─────────────────┘      └──────────────┘      └─────────────┘
+```
+
+### Ключові особливості
+
+#### 1. **OAuth 2.0 Flow Support**
+
+- **Authorization Code Flow**: Для веб-додатків з backend
+- **PKCE Extension**: Додатковий захист для SPA та мобільних додатків
+- **Client Credentials Flow**: Для service-to-service комунікації
+- **Refresh Token Flow**: Оновлення access tokens без повторної аутентифікації
+
+#### 2. **Token Management**
+
+```
+┌────────────────────────────────────────────────────────┐
+│ Access Token (JWT)                                     │
+│ ┌────────────────────────────────────────────────────┐ │
+│ │ Header:                                            │ │
+│ │   { "alg": "RS256", "typ": "JWT" }                │ │
+│ │ Payload:                                           │ │
+│ │   { "sub": "user-id",                             │ │
+│ │     "email": "user@example.com",                  │ │
+│ │     "roles": ["buyer", "verified"],               │ │
+│ │     "exp": 1699999999,                            │ │
+│ │     "iss": "https://auth.tender-platform.com"     │ │
+│ │   }                                                │ │
+│ │ Signature: RS256(header + payload, private_key)   │ │
+│ └────────────────────────────────────────────────────┘ │
+└────────────────────────────────────────────────────────┘
+
+Lifetime: 15 minutes (Access) / 30 days (Refresh)
+```
+
+**Типи токенів:**
+- **Access Token**: Короткоживучий JWT для доступу до API (15 хв)
+- **Refresh Token**: Довгоживучий токен для отримання нового access token (30 днів)
+- **ID Token**: OpenID Connect токен з інформацією про користувача
+- **Anti-forgery Token**: CSRF захист для authorization flow
+
+#### 3. **Authentication Flow**
+
+```
+┌────────────────────────────────────────────────────────┐
+│ 1. Authorization Request                               │
+│    GET /oauth/authorize?                               │
+│        response_type=code                              │
+│        &client_id=xxx                                  │
+│        &redirect_uri=https://app.com/callback          │
+│        &scope=openid profile email                     │
+│        &state=random_state                             │
+│        &code_challenge=xxx (PKCE)                      │
+├────────────────────────────────────────────────────────┤
+│ 2. User Authentication                                 │
+│    ├─ Login form (username/password)                   │
+│    ├─ 2FA verification (optional)                      │
+│    └─ Consent screen                                   │
+├────────────────────────────────────────────────────────┤
+│ 3. Authorization Code Response                         │
+│    Redirect: https://app.com/callback?                 │
+│              code=AUTH_CODE&state=random_state         │
+├────────────────────────────────────────────────────────┤
+│ 4. Token Exchange                                      │
+│    POST /oauth/token                                   │
+│    {                                                   │
+│      "grant_type": "authorization_code",               │
+│      "code": "AUTH_CODE",                              │
+│      "redirect_uri": "https://app.com/callback",       │
+│      "client_id": "xxx",                               │
+│      "code_verifier": "xxx" (PKCE)                     │
+│    }                                                   │
+├────────────────────────────────────────────────────────┤
+│ 5. Token Response                                      │
+│    {                                                   │
+│      "access_token": "eyJhbG...",                      │
+│      "token_type": "Bearer",                           │
+│      "expires_in": 900,                                │
+│      "refresh_token": "xxx",                           │
+│      "id_token": "eyJhbG..." (OpenID)                  │
+│    }                                                   │
+└────────────────────────────────────────────────────────┘
+```
+
+## Інтеграція з тендерним майданчиком
+
+### Сценарії використання
+
+#### 1. **Аутентифікація користувача (SPA)**
+```csharp
+// .NET Backend - OAuth Server Configuration
+services.AddAuthentication()
+    .AddJwtBearer(options =>
+    {
+        options.Authority = "https://auth.tender-platform.com";
+        options.Audience = "tender-api";
+        options.TokenValidationParameters = new TokenValidationParameters
+        {
+            ValidateIssuer = true,
+            ValidateAudience = true,
+            ValidateLifetime = true,
+            ValidateIssuerSigningKey = true,
+            ClockSkew = TimeSpan.Zero
+        };
+    });
+
+// Frontend Integration
+const authConfig = {
+  clientId: 'tender-web-app',
+  redirectUri: 'https://tender-platform.com/callback',
+  scope: 'openid profile email tender.read tender.write',
+  responseType: 'code',
+  usePkce: true
+};
+
+// Ініціація OAuth flow
+const authorizeUrl = `${AUTH_SERVER}/oauth/authorize?` +
+  `response_type=${authConfig.responseType}` +
+  `&client_id=${authConfig.clientId}` +
+  `&redirect_uri=${encodeURIComponent(authConfig.redirectUri)}` +
+  `&scope=${encodeURIComponent(authConfig.scope)}` +
+  `&state=${generateState()}` +
+  `&code_challenge=${codeChallenge}` +
+  `&code_challenge_method=S256`;
+
+window.location.href = authorizeUrl;
+```
+
+#### 2. **Service-to-Service Authentication**
+```csharp
+// Notification Service → Tender API
+public class TenderApiClient
+{
+    private readonly HttpClient _httpClient;
+    private readonly ITokenService _tokenService;
+    
+    public async Task<TenderDto> GetTenderAsync(Guid tenderId)
+    {
+        // Отримання токена через Client Credentials flow
+        var token = await _tokenService.GetClientCredentialsTokenAsync(
+            clientId: "notification-service",
+            clientSecret: Configuration["OAuth:ClientSecret"],
+            scope: "tender.read"
+        );
+        
+        _httpClient.DefaultRequestHeaders.Authorization = 
+            new AuthenticationHeaderValue("Bearer", token.AccessToken);
+            
+        var response = await _httpClient.GetAsync($"/api/tenders/{tenderId}");
+        return await response.Content.ReadFromJsonAsync<TenderDto>();
+    }
+}
+
+// Token Service Implementation
+public class TokenService : ITokenService
+{
+    public async Task<TokenResponse> GetClientCredentialsTokenAsync(
+        string clientId, string clientSecret, string scope)
+    {
+        var tokenRequest = new ClientCredentialsTokenRequest
+        {
+            Address = $"{_oauthServer}/oauth/token",
+            ClientId = clientId,
+            ClientSecret = clientSecret,
+            Scope = scope
+        };
+        
+        var tokenResponse = await _httpClient.RequestClientCredentialsTokenAsync(
+            tokenRequest);
+            
+        if (tokenResponse.IsError)
+            throw new OAuth2Exception(tokenResponse.Error);
+            
+        return tokenResponse;
+    }
+}
+```
+
+#### 3. **Захист API endpoints**
+```csharp
+// Tender API - Protected Controller
+[ApiController]
+[Route("api/[controller]")]
+[Authorize] // Вимагає валідний access token
+public class TendersController : ControllerBase
+{
+    [HttpGet("{id}")]
+    [Authorize(Policy = "TenderRead")] // Специфічний scope
+    public async Task<ActionResult<TenderDto>> GetTender(Guid id)
+    {
+        // Доступ до claims з JWT токена
+        var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        var userRoles = User.FindAll(ClaimTypes.Role)
+            .Select(c => c.Value)
+            .ToList();
+        
+        var tender = await _tenderService.GetByIdAsync(id);
+        
+        // Перевірка прав доступу
+        if (!await _authorizationService.AuthorizeAsync(
+            User, tender, "CanViewTender"))
+        {
+            return Forbid();
+        }
+        
+        return Ok(tender);
+    }
+    
+    [HttpPost]
+    [Authorize(Policy = "TenderWrite")]
+    public async Task<ActionResult<TenderDto>> CreateTender(
+        CreateTenderRequest request)
+    {
+        var userId = Guid.Parse(User.FindFirst(ClaimTypes.NameIdentifier).Value);
+        var tender = await _tenderService.CreateAsync(request, userId);
+        return CreatedAtAction(nameof(GetTender), new { id = tender.Id }, tender);
+    }
+}
+
+// Startup.cs - Policy Configuration
+services.AddAuthorization(options =>
+{
+    options.AddPolicy("TenderRead", policy =>
+        policy.RequireClaim("scope", "tender.read"));
+        
+    options.AddPolicy("TenderWrite", policy =>
+        policy.RequireClaim("scope", "tender.write"));
+        
+    options.AddPolicy("AdminOnly", policy =>
+        policy.RequireRole("admin"));
+});
+```
+
+#### 4. **Refresh Token Flow**
+```typescript
+// Frontend - Automatic token refresh
+class AuthService {
+  private refreshTokenTimeout: NodeJS.Timeout;
+  
+  async refreshAccessToken(): Promise<TokenResponse> {
+    const refreshToken = localStorage.getItem('refresh_token');
+    
+    const response = await fetch(`${AUTH_SERVER}/oauth/token`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        grant_type: 'refresh_token',
+        refresh_token: refreshToken,
+        client_id: 'tender-web-app'
+      })
+    });
+    
+    if (!response.ok) {
+      // Refresh token expired - redirect to login
+      this.logout();
+      throw new Error('Token refresh failed');
+    }
+    
+    const tokens = await response.json();
+    this.storeTokens(tokens);
+    this.scheduleTokenRefresh(tokens.expires_in);
+    
+    return tokens;
+  }
+  
+  private scheduleTokenRefresh(expiresIn: number) {
+    // Оновлюємо токен за 1 хвилину до закінчення
+    const refreshTime = (expiresIn - 60) * 1000;
+    this.refreshTokenTimeout = setTimeout(() => {
+      this.refreshAccessToken();
+    }, refreshTime);
+  }
+}
+```
+
+### Архітектура інтеграції
+
+```
+┌──────────────────────────────────────────────────────┐
+│                  Frontend (React/Vue)                │
+│  ┌────────────┐  ┌────────────┐  ┌────────────┐    │
+│  │ Auth Store │  │ HTTP Client│  │ Token Mgmt │    │
+│  └─────┬──────┘  └─────┬──────┘  └─────┬──────┘    │
+└────────┼───────────────┼───────────────┼────────────┘
+         │               │               │
+         ▼               ▼               ▼
+┌──────────────────────────────────────────────────────┐
+│              OAuth Server (.NET 8)                   │
+│  ┌──────────────────────────────────────────────┐   │
+│  │ IdentityServer4 / Duende IdentityServer      │   │
+│  └──────────────────────────────────────────────┘   │
+│  ┌────────────┐  ┌────────────┐  ┌────────────┐    │
+│  │  AuthN     │  │  AuthZ     │  │   Token    │    │
+│  │  Endpoints │  │  Policies  │  │  Validator │    │
+│  └────────────┘  └────────────┘  └────────────┘    │
+└───────────┬──────────────────────────────────────────┘
+            │
+            ▼
+┌──────────────────────────────────────────────────────┐
+│              Resource APIs (.NET 8)                  │
+│  ┌────────────┐  ┌────────────┐  ┌────────────┐    │
+│  │  Tender    │  │  Bid       │  │  User      │    │
+│  │  API       │  │  API       │  │  API       │    │
+│  └────────────┘  └────────────┘  └────────────┘    │
+└──────────────────────────────────────────────────────┘
+```
+
+## Переваги використання
+
+### Технічні переваги
+- **Standards-based**: Повна підтримка OAuth 2.0 RFC 6749 та OpenID Connect
+- **Stateless**: JWT токени не вимагають серверного storage для валідації
+- **Scalable**: Горизонтальне масштабування без session affinity
+- **Cross-platform**: Підтримка веб, мобільних та desktop додатків
+
+### Бізнес-переваги
+- **Single Sign-On (SSO)**: Єдина аутентифікація для всіх сервісів
+- **Third-party integration**: Можливість інтеграції зовнішніх сервісів
+- **Granular permissions**: Точне управління доступом через scopes
+- **Audit trail**: Повне логування всіх операцій аутентифікації
+
+## Конфігурація
+
+### Environment Variables (.NET)
+```bash
+# OAuth Server Configuration
+OAUTH__ISSUER_URI=https://auth.tender-platform.com
+OAUTH__SIGNING_KEY_PATH=/keys/private-key.pem
+OAUTH__ACCESS_TOKEN_LIFETIME=900  # 15 minutes
+OAUTH__REFRESH_TOKEN_LIFETIME=2592000  # 30 days
+
+# Database
+ConnectionStrings__Identity=Server=db;Database=OAuth;User=oauth;Password=xxx
+
+# Redis (Token Store)
+Redis__ConnectionString=redis:6379
+Redis__InstanceName=oauth_tokens_
+
+# CORS
+CORS__AllowedOrigins=https://tender-platform.com,https://admin.tender-platform.com
+```
+
+### appsettings.json
+```json
+{
+  "IdentityServer": {
+    "IssuerUri": "https://auth.tender-platform.com",
+    "Clients": [
+      {
+        "ClientId": "tender-web-app",
+        "ClientName": "Tender Platform Web",
+        "AllowedGrantTypes": ["authorization_code"],
+        "RequirePkce": true,
+        "RequireClientSecret": false,
+        "RedirectUris": [
+          "https://tender-platform.com/callback"
+        ],
+        "AllowedScopes": [
+          "openid",
+          "profile",
+          "email",
+          "tender.read",
+          "tender.write"
+        ],
+        "AllowOfflineAccess": true,
+        "AccessTokenLifetime": 900,
+        "RefreshTokenLifetime": 2592000
+      },
+      {
+        "ClientId": "notification-service",
+        "ClientName": "Notification Service",
+        "AllowedGrantTypes": ["client_credentials"],
+        "ClientSecrets": [
+          { "Value": "K7gNU3sdo+OL0wNhqoVWhr3g6s1xYv72ol/pe/Unols=" }
+        ],
+        "AllowedScopes": ["tender.read", "user.read"]
+      }
+    ],
+    "ApiScopes": [
+      {
+        "Name": "tender.read",
+        "DisplayName": "Read tender data",
+        "Description": "Allows reading tender information"
+      },
+      {
+        "Name": "tender.write",
+        "DisplayName": "Write tender data",
+        "Description": "Allows creating and updating tenders"
+      }
+    ]
+  }
+}
+```
+
+### Program.cs Configuration
+```csharp
+var builder = WebApplication.CreateBuilder(args);
+
+// Add IdentityServer
+builder.Services.AddIdentityServer(options =>
+{
+    options.IssuerUri = builder.Configuration["OAuth:IssuerUri"];
+    options.Authentication.CookieLifetime = TimeSpan.FromHours(2);
+})
+.AddInMemoryClients(builder.Configuration.GetSection("IdentityServer:Clients"))
+.AddInMemoryApiScopes(builder.Configuration.GetSection("IdentityServer:ApiScopes"))
+.AddInMemoryIdentityResources(new List<IdentityResource>
+{
+    new IdentityResources.OpenId(),
+    new IdentityResources.Profile(),
+    new IdentityResources.Email()
+})
+.AddAspNetIdentity<ApplicationUser>()
+.AddDeveloperSigningCredential(); // Use AddSigningCredential in production
+
+// Add Redis distributed cache for tokens
+builder.Services.AddStackExchangeRedisCache(options =>
+{
+    options.Configuration = builder.Configuration["Redis:ConnectionString"];
+    options.InstanceName = builder.Configuration["Redis:InstanceName"];
+});
+
+var app = builder.Build();
+
+app.UseIdentityServer();
+app.Run();
+```
+
+## Моніторинг та метрики
+
+### Ключові показники
+- **Token issuance rate**: Кількість виданих токенів за хвилину
+- **Authentication success rate**: % успішних аутентифікацій (target: &gt;99%)
+- **Token validation latency**: Час валідації JWT токена (target: &lt;10ms)
+- **Failed login attempts**: Кількість невдалих спроб входу
+- **Active sessions**: Поточна кількість активних сесій
+
+### Алерти
+- Різке зростання failed login attempts (&gt;100/min)
+- Token validation latency &gt;50ms
+- Redis connection failures
+- Certificate expiration warning (&lt;30 days)
+
+### Dashboard Metrics (.NET)
+```csharp
+// Application Insights / Prometheus metrics
+public class OAuthMetrics
+{
+    private readonly Counter _tokenIssued;
+    private readonly Counter _loginAttempts;
+    private readonly Histogram _tokenValidationDuration;
+    
+    public void RecordTokenIssued(string grantType)
+    {
+        _tokenIssued.WithLabels(grantType).Inc();
+    }
+    
+    public void RecordLoginAttempt(bool success)
+    {
+        _loginAttempts.WithLabels(success ? "success" : "failure").Inc();
+    }
+    
+    public void RecordTokenValidation(double durationMs)
+    {
+        _tokenValidationDuration.Observe(durationMs);
+    }
+}
+```
+
+## Безпека
+
+### Best Practices
+1. **PKCE обов'язковий**: Для SPA та мобільних додатків
+2. **Короткий TTL access tokens**: Максимум 15 хвилин
+3. **Rotate refresh tokens**: Видавати новий refresh token при кожному використанні
+4. **Rate limiting**: Обмеження спроб аутентифікації
+5. **HTTPS only**: Всі OAuth endpoints тільки через HTTPS
+6. **Strong client secrets**: Мінімум 32 символи випадкових даних
+
+### Захист від атак
+```csharp
+// Rate limiting middleware
+services.AddRateLimiter(options =>
+{
+    options.AddFixedWindowLimiter("auth", opt =>
+    {
+        opt.PermitLimit = 5;
+        opt.Window = TimeSpan.FromMinutes(1);
+        opt.QueueProcessingOrder = QueueProcessingOrder.OldestFirst;
+    });
+});
+
+// CSRF protection
+services.AddAntiforgery(options =>
+{
+    options.HeaderName = "X-CSRF-TOKEN";
+    options.Cookie.SecurePolicy = CookieSecurePolicy.Always;
+});
+
+// Brute force protection
+public class BruteForceProtectionService
+{
+    private readonly IDistributedCache _cache;
+    
+    public async Task<bool> IsLockedOutAsync(string username)
+    {
+        var key = $"lockout_{username}";
+        var attempts = await _cache.GetStringAsync(key);
+        
+        if (int.TryParse(attempts, out var count) && count &gt;= 5)
+        {
+            return true; // Locked for 15 minutes after 5 failed attempts
+        }
+        
+        return false;
+    }
+}
+```
+
+### Token Security
+- **JWT Signature**: RS256 (RSA with SHA-256)
+- **Key rotation**: Автоматична ротація signing keys кожні 90 днів
+- **Token revocation**: Blacklist для скомпрометованих токенів
+- **Scope validation**: Перевірка scopes на кожному API запиті
+
+## Посилання
+
+- [OAuth 2.0 RFC 6749](https://datatracker.ietf.org/doc/html/rfc6749)
+- [OpenID Connect Specification](https://openid.net/connect/)
+- [Duende IdentityServer Documentation](https://docs.duendesoftware.com/identityserver/v6)
+- [Microsoft Identity Platform](https://learn.microsoft.com/en-us/azure/active-directory/develop/)
+- [PKCE RFC 7636](https://datatracker.ietf.org/doc/html/rfc7636)

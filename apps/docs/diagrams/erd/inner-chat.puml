@@ -1,0 +1,59 @@
+@startuml
+
+package "InnerChat Service" as InnerChatService {
+    entity "ChatMessageDb" as ChatMessage {
+        * **Id : Guid** <<PK>>
+        --
+        * SubscriptionEntityId : Guid <<FK>>
+        ParentMessageId : Guid <<FK>>
+        * UserLogin : string
+        Timestamp : DateTime
+        Message : string
+    }
+    
+    entity "MessageTagDb" as MessageTag {
+        * **Id : Guid** <<PK>>
+        --
+        * MessageId : Guid <<FK>>
+        * Type : MessageTagType(enum)
+        Key : string
+        Value : string <<JSON>>
+    }
+    
+    entity "MessageAttachmentDb" as MessageAttachment {
+        * **Id : Guid** <<PK>>
+        --
+        MessageId : Guid? <<FK>>
+        FileName : string
+        FileSize : decimal
+        Type : string
+        Content : byte[]
+    }
+    
+    entity "MessageViewDb" as MessageView {
+        * **Id : Guid** <<PK>>
+        --
+        * MessageId : Guid <<FK>>
+        * SubscriptionId : Guid <<FK>>
+        Viewed : bool
+        EventViewed : bool
+    }
+
+    enum MessageTagType {
+        User = 0
+        Lot = 1
+        Bid = 2
+        Tender = 3
+    }
+
+    ' Relationships
+    ChatMessage::Id ||--o{ MessageTag::MessageId : "has tags"
+    ChatMessage::Id ||--o{ MessageAttachment::MessageId : "has attachments"
+    ChatMessage::Id ||--o{ MessageView::MessageId : "has views"
+    ChatMessage::Id ||--o{ ChatMessage::ParentMessageId : "replies to"
+
+    ' Enum relationships (dashed)
+    MessageTag::Type }o..|| MessageTagType : "uses"
+}
+
+@enduml

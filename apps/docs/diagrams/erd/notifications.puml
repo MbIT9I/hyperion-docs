@@ -1,0 +1,67 @@
+@startuml
+!theme plain
+skinparam linetype ortho
+
+package "Notification Service" as NotificationService {
+
+  entity "Notification" as Notification {
+    * **Id : Guid** <<PK>>
+    --
+    * NotificationMessageId : Guid <<FK>>
+    * SubscriptionId : Guid <<FK>>
+    * Viewed : Boolean
+  }
+
+  entity "NotificationMessage" as NotificationMessage {
+    * **Id : Guid** <<PK>>
+    --
+    * Type : NotificationType(short)
+    * DateSend : DateTime
+  }
+
+  entity "NotificationMessageProperty" as NotificationMessageProperty {
+    * **NotificationMessageId : Guid** <<PK,FK>>
+    * **PropertyKey : NotificationKeyType(short)** <<PK,FK>>
+    --
+    * PropertyValue : String
+  }
+
+  enum NotificationType {
+    TenderUpdate = 1
+    FileGenerated = 2
+    AddTenderComment = 3
+    AddTenderBid = 4
+    ChangeTenderAgreeStatus = 5
+    AwatingTenderConfirmation = 6
+    CancelTenderBid = 7
+    UnselectTenderBid = 8
+    ProlongateTender = 9
+    ChangeTenderStatus = 10
+    ChangeTenderWinner = 11
+    SubscribeUsers = 12
+    AgreementAssigned = 16
+  }
+
+  enum NotificationKeyType {
+    CommentId = 4
+    BidId = 6
+    StatusFrom = 7
+    StatusTo = 8
+    ProlongationTo = 9
+    ProlongationFrom = 10
+    AgreementStatus = 11
+    Author = 12
+    AuthorType = 13
+    Comment = 14
+    Reason = 15
+    Title = 16
+  }
+
+  NotificationMessage ||--o{ Notification
+  NotificationMessage ||--o{ NotificationMessageProperty
+
+  NotificationMessage::Type }o..|| NotificationType : "uses"
+  NotificationMessageProperty::PropertyKey }o..|| NotificationKeyType : "uses"
+}
+
+@enduml

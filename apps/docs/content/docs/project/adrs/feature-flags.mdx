@@ -1,0 +1,290 @@
+---
+title: ADR-001 - Вибір системи Feature Flags
+description: Архітектурне рішення щодо вибору системи керування фіча-флагами
+icon: Book
+---
+
+# ADR-001: Вибір системи Feature Flags
+
+## Статус
+**Прийнято** — 9 листопада 2025 р.
+
+## Контекст
+
+Тендерний майданчик потребує механізму динамічного керування функціональністю додатку без необхідності деплою коду. Це дозволить:
+
+- Поступово розкочувати нові функції для обраних користувачів
+- Швидко вимикати проблемні фічі у production
+- Проводити A/B тестування різних варіантів UI/UX
+- Керувати доступом до функцій на основі ролей та підписок
+- Знижувати ризики при запуску великих змін
+
+### Вимоги
+
+**Функціональні:**
+- Підтримка boolean flags (on/off)
+- Підтримка multivariate flags (A/B/C testing)
+- Таргетинг по користувачам, ролях, регіонах
+- Real-time або near-real-time оновлення
+- Управлінська панель для non-technical користувачів
+
+**Нефункціональні:**
+- Мінімальна затримка (latency &lt;10ms)
+- Висока доступність (99.9%+)
+- Можливість роботи offline/fallback values
+- Підтримка як frontend (React), так і backend (.NET)
+- Простота інтеграції та підтримки
+
+## Розглянуті варіанти
+
+### Варіант 1: Microsoft .NET Feature Management
+
+**Опис:**  
+Вбудована бібліотека від Microsoft для керування feature flags у .NET додатках через `Microsoft.FeatureManagement`.
+
+**Переваги:**
+- ✅ Нативна інтеграція з .NET екосистемою
+- ✅ Підтримка Azure App Configuration для централізованого керування
+- ✅ Built-in підтримка у ASP.NET Core (middleware, tag helpers)
+- ✅ Безкоштовна, open-source
+- ✅ Гарна документація від Microsoft
+- ✅ Type-safe конфігурація через C# enum
+- ✅ Підтримка feature filters (targeting, percentage, time window)
+
+**Недоліки:**
+- ❌ Обмежена підтримка frontend (потрібні додаткові API endpoints)
+- ❌ Відсутність вбудованого UI для керування (крім Azure Portal)
+- ❌ Менш зручна для non-technical користувачів
+- ❌ Немає вбудованої аналітики та A/B testing metrics
+- ❌ Складніше налаштування для multi-platform (веб + мобайл)
+- ❌ Azure App Configuration має додаткову вартість
+
+**Приклад використання:**
+```csharp
+// Backend
+if (await _featureManager.IsEnabledAsync("NewTenderUI"))
+{
+    return new NewTenderViewResult();
+}
+
+// Frontend API
+[HttpGet("features/{featureName}")]
+public async Task<bool> IsFeatureEnabled(string featureName)
+{
+    return await _featureManager.IsEnabledAsync(featureName);
+}
+```
+
+**Вартість:**  
+- Бібліотека: безкоштовна
+- Azure App Configuration: $0.90/10,000 requests (optional)
+
+---
+
+### Варіант 2: GrowthBook (Open-Source)
+
+**Опис:**  
+Open-source платформа для feature flags та A/B експериментів з SDK для різних платформ.
+
+**Переваги:**
+- ✅ SDK для React, .NET, Node.js та інших платформ
+- ✅ Локальне обчислення (no network latency на runtime)
+- ✅ Інтуїтивний веб-інтерфейс для управління
+- ✅ Вбудована A/B testing аналітика
+- ✅ Visual editor для експериментів
+- ✅ Open-source, можливість self-hosting
+- ✅ Підтримка advanced targeting (attributes, % rollout)
+- ✅ Real-time updates через SSE або webhooks
+- ✅ Безкоштовний для self-hosted варіанту
+
+**Недоліки:**
+- ❌ Потрібна окрема інфраструктура для GrowthBook server
+- ❌ Додаткова складність у deployment та maintenance
+- ❌ Менша інтеграція з .NET екосистемою порівняно з нативним рішенням
+- ❌ Потрібно підтримувати додатковий сервіс (DB, Redis для кешування)
+- ❌ Крива навчання для команди
+
+**Приклад використання:**
+```typescript
+// Frontend
+if (growthbook.isOn("new-tender-ui")) {
+  return <NewTenderUI />;
+}
+
+// Backend (.NET)
+var gb = new GrowthBook.GrowthBook(context);
+if (gb.IsOn("new-tender-ui")) {
+    // New logic
+}
+```
+
+**Вартість:**
+- Self-hosted: безкоштовно (інфраструктура ~$50-100/міс)
+- Cloud: від $20/місяць (для малих проєктів)
+
+---
+
+### Варіант 3: Самописна система
+
+**Опис:**  
+Власна реалізація feature flags з використанням бази даних, Redis для кешування та простого UI.
+
+**Переваги:**
+- ✅ Повний контроль над функціональністю
+- ✅ Можливість кастомізації під специфічні потреби проєкту
+- ✅ Відсутність vendor lock-in
+- ✅ Інтеграція з існуючою інфраструктурою (DB, Redis)
+- ✅ Немає зовнішніх залежностей
+- ✅ Можливість оптимізації під конкретні use cases
+
+**Недоліки:**
+- ❌ Високі витрати на розробку (150-300 годин)
+- ❌ Потрібна підтримка та доопрацювання
+- ❌ Ризик багів та проблем безпеки
+- ❌ Відсутність advanced features (A/B testing analytics, visual editor)
+- ❌ Довший час до production
+- ❌ Потрібна документація та onboarding для команди
+- ❌ Відсутність best practices з коробки
+
+**Компоненти:**
+```
+┌─────────────┐     ┌──────────────┐     ┌─────────────┐
+│  Admin UI   │────▶│  API Server  │────▶│  Database   │
+│  (React)    │     │   (.NET)     │     │ (Postgres)  │
+└─────────────┘     └──────────────┘     └─────────────┘
+                           │
+                           ▼
+                    ┌──────────────┐
+                    │ Redis Cache  │
+                    │  (Feature    │
+                    │   States)    │
+                    └──────────────┘
+```
+
+**Оцінка зусиль:**
+- Backend API: 80-120 годин
+- Admin UI: 60-100 годин
+- Testing & Documentation: 40-60 годин
+- **Total: 180-280 годин розробки**
+
+**Вартість:**
+- Розробка: $7,000-$11,000 (при $40/год)
+- Підтримка: ~20 годин/місяць (~$800/міс)
+
+---
+
+## Порівняльна таблиця
+
+| Критерій | .NET Feature Mgmt | GrowthBook | Самописна |
+|----------|-------------------|------------|-----------|
+| **Time to Production** | 1-2 тижні | 2-3 тижні | 6-8 тижнів |
+| **Складність інтеграції** | Низька | Середня | Висока |
+| **Frontend підтримка** | Обмежена | Відмінна | Кастомна |
+| **A/B Testing** | Немає | ✅ Вбудована | Потрібна розробка |
+| **UI для non-tech** | Azure Portal | ✅ Інтуїтивний | Потрібна розробка |
+| **Latency** | ~5ms | &lt;1ms (local) | Залежить від реалізації |
+| **Підтримка** | Microsoft | Community/Paid | Власна команда |
+| **Вартість (1 рік)** | $0-500 | $0-1,200 | $10,000-15,000 |
+| **Масштабованість** | Висока | Висока | Залежить від реалізації |
+| **Vendor Lock-in** | Azure (optional) | Низький | Відсутній |
+
+## Рішення
+
+**Обрано: GrowthBook (Open-Source, Self-Hosted)**
+
+### Обґрунтування
+
+1. **Баланс функціональності та складності**
+   - GrowthBook надає всі необхідні features з коробки (boolean flags, A/B testing, targeting)
+   - Не потребує багато часу на розробку порівняно з самописним рішенням
+   - Має готовий UI та SDK для всіх наших платформ
+
+2. **Frontend-first підхід**
+   - Локальне обчислення на клієнті (zero latency)
+   - Відмінна підтримка React через `@growthbook/growthbook-react`
+   - Робота offline з fallback values
+
+3. **A/B testing out of the box**
+   - Вбудована аналітика результатів експериментів
+   - Visual editor для налаштування
+   - Інтеграція з analytics tools
+
+4. **Економічна ефективність**
+   - Self-hosted версія безкоштовна
+   - Інфраструктура: ~$70/міс (GrowthBook server + MongoDB)
+   - Набагато дешевше за самописну систему ($10k+)
+
+5. **Open-source та community**
+   - Активна розробка та підтримка
+   - Можливість контрибуції та кастомізації
+   - Відсутність vendor lock-in
+
+6. **Недоліки .NET Feature Management для нашого випадку**
+   - Основна фокус на backend, а нам потрібен frontend-first підхід
+   - Немає вбудованого A/B testing
+   - UI тільки через Azure Portal (не підходить для self-hosted)
+
+### План впровадження
+
+**Phase 1: Infrastructure Setup (Тиждень 1)**
+- Розгортання GrowthBook server у Docker
+- Налаштування MongoDB для storage
+- Конфігурація Redis для кешування SDK responses
+
+**Phase 2: Backend Integration (Тиждень 2)**
+- Інтеграція `GrowthBook.SDK.CSharp` у .NET сервіси
+- Налаштування feature evaluation
+- Додавання middleware для context injection
+
+**Phase 3: Frontend Integration (Тиждень 3)**
+- Інтеграція `@growthbook/growthbook-react`
+- Створення wrapper компонентів для feature flags
+- Налаштування SSE для real-time updates
+
+**Phase 4: Testing & Documentation (Тиждень 4)**
+- Тестування на staging
+- Написання документації для команди
+- Training session для PM/PO
+
+## Наслідки
+
+### Позитивні
+- ✅ Швидкий time-to-market (4 тижні vs 6-8 для самописного)
+- ✅ Зменшення ризиків при розкаті нових фіч
+- ✅ Можливість data-driven рішень через A/B testing
+- ✅ Покращення Developer Experience (готові SDK)
+- ✅ Економія бюджету (~$9k за перший рік порівняно з самописним)
+
+### Негативні
+- ⚠️ Потрібна додаткова інфраструктура (GrowthBook server)
+- ⚠️ Залежність від зовнішнього проєкту (хоча open-source)
+- ⚠️ Крива навчання для команди (1-2 тижні)
+
+### Ризики та мітігація
+
+| Ризик | Ймовірність | Вплив | Мітігація |
+|-------|-------------|-------|-----------|
+| GrowthBook server downtime | Низька | Середній | Локальне кешування SDK, fallback values |
+| Недостатня продуктивність | Низька | Високий | Load testing перед prod, горизонтальне масштабування |
+| Складність підтримки | Середня | Низький | Документація, training, automated monitoring |
+| Відсутність потрібної фічі | Низька | Середній | Open-source — можемо додати самостійно |
+
+## Альтернативні рішення на майбутнє
+
+Якщо GrowthBook не задовольнить потреби, розглянути:
+1. **LaunchDarkly** — enterprise рішення з багатою функціональністю (але дороге)
+2. **Unleash** — альтернативний open-source (схожий на GrowthBook)
+3. **Split.io** — якщо потрібна розширена аналітика
+
+## Посилання
+
+- [GrowthBook Documentation](https://docs.growthbook.io/)
+- [GrowthBook GitHub](https://github.com/growthbook/growthbook)
+- [Microsoft Feature Management](https://learn.microsoft.com/en-us/azure/azure-app-configuration/concept-feature-management)
+- [Feature Flags Best Practices](https://martinfowler.com/articles/feature-toggles.html)
+
+---
+
+**Автори:** Architecture Team  
+**Reviewers:** CTO, Lead Developer, Product Owner  
+**Дата останнього оновлення:** 9 листопада 2025 р.

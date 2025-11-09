@@ -1,0 +1,9 @@
+{
+  "title": "Architecture",
+  "pages": [
+    "index",
+    "adrs",
+    "erd",
+    "c4"
+  ]
+}
